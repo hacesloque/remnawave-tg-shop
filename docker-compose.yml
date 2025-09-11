@@ -1,15 +1,19 @@
 services:
   remnawave-tg-shop:
-    image: ghcr.io/machka-pasla/remnawave-tg-shop:latest
-#    build: .
+#    image: ghcr.io/machka-pasla/remnawave-tg-shop:latest
+    build: .
     container_name: remnawave-tg-shop
     hostname: remnawave-tg-shop
     env_file:
       - .env
     networks:
       - remnawave-network
+      - edge
     volumes:
       - ./locales:/app/locales
+      - ./bot:/app/bot
+      - ./config:/app/config
+      - ./db:/app/db
     restart: unless-stopped
 
   remnawave-tg-shop-db:
@@ -26,6 +30,8 @@ services:
 
 networks:
   remnawave-network:
+    external: true
+  edge:
     external: true
 
 volumes:

@@ -1,18 +1,20 @@
-# Игнорировать базу данных
-bot_database.sqlite3
-
-# Игнорировать файлы окружения
-.env
-
-# Игнорировать кэш Python
+# Python
 __pycache__/
+*.pyc
+*.pyo
+*.pyd
+.venv/
+.env.local
+.env.*.local
 
-# Игнорировать настройки IDE (если используешь, например, PyCharm или VSCode)
-.idea/
-.vscode/
-
-# Игнорировать Docker артефакты (если вдруг)
+# Docker
 *.log
-*.pid
-locales/ru_backup.json
-locales/en_backup.json
+docker-data/
+remnawave-tg-shop-db-data/
+remnawave-db-data/
+remnawave-redis-data/
+
+# OS
+.DS_Store
+Thumbs.db
+.env

@@ -2,11 +2,13 @@ import json
 import logging
 import hmac
 import hashlib
+from typing import Optional
+
 from aiohttp import web
 from aiogram import Bot
 from aiogram.types import InlineKeyboardMarkup
 from sqlalchemy.orm import sessionmaker
-from typing import Optional
+
 from config.settings import Settings
 from .panel_api_service import PanelApiService
 from bot.middlewares.i18n import JsonI18n
@@ -14,14 +16,23 @@ from bot.keyboards.inline.user_keyboards import get_subscribe_only_markup
 from db.dal import user_dal
 from bot.utils.date_utils import add_months
 
+
 EVENT_MAP = {
     "user.expires_in_72_hours": (3, "subscription_72h_notification"),
     "user.expires_in_48_hours": (2, "subscription_48h_notification"),
     "user.expires_in_24_hours": (1, "subscription_24h_notification"),
 }
 
+
 class PanelWebhookService:
-    def __init__(self, bot: Bot, settings: Settings, i18n: JsonI18n, async_session_factory: sessionmaker, panel_service: PanelApiService):
+    def __init__(
+        self,
+        bot: Bot,
+        settings: Settings,
+        i18n: JsonI18n,
+        async_session_factory: sessionmaker,
+        panel_service: PanelApiService,
+    ):
         self.bot = bot
         self.settings = settings
         self.i18n = i18n
@@ -44,125 +55,121 @@ class PanelWebhookService:
         except Exception as e:
             logging.error(f"Failed to send notification to {user_id}: {e}")
 
-    async def _handle_expired_subscription(self, session, user_id: int, user_payload: dict, 
-                                         lang: str, markup, first_name: str) -> bool:
-        """Handle expired subscription - auto-renew tribute users if no cancellation was received.
+    async def _handle_expired_subscription(
+        self,
+        session,
+        user_id: int,
+        user_payload: dict,
+        lang: str,
+        markup,
+        first_name: str,
+    ) -> bool:
+        """
+        Handle expired subscription — auto-renew Tribute users if no cancellation was received.
 
         Returns True if an auto-renewal was performed (and renewal message sent), False otherwise.
         """
-        from db.dal import subscription_dal, payment_dal
+        from db.dal import subscription_dal, payment_dal  # local imports to avoid cycles
         from datetime import datetime, timezone
-        
+
         try:
             auto_renewed = False
-            # Check if user has tribute subscriptions that weren't cancelled
-            user_subs = await subscription_dal.get_active_subscriptions_for_user(session, user_id)
-            
-            for sub in user_subs:
-                # Check if this subscription was marked as cancelled (from tribute cancellation webhook)
-                if sub.status_from_panel == 'CANCELLED':
-                    logging.info(f"Subscription {sub.subscription_id} for user {user_id} was cancelled, skipping auto-renewal")
-                    continue
-                    
-                # Check if this user has tribute payments
-                last_tribute_duration = await payment_dal.get_last_tribute_payment_duration(session, user_id)
-                
-                if last_tribute_duration is not None:
-                    # This user has tribute payments, auto-renew for the same duration
-                    logging.info(f"Auto-renewing tribute subscription for user {user_id} for {last_tribute_duration} months")
-                    
-                    # Extend subscription by the last payment duration (calendar months)
-                    new_end_date = add_months(datetime.now(timezone.utc), last_tribute_duration)
-                    
-                    # Update local DB subscription
-                    await subscription_dal.update_subscription(
-                        session,
-                        sub.subscription_id,
-                        {
-                            'end_date': new_end_date,
-                            'status_from_panel': 'ACTIVE',
-                            'is_active': True
-                        }
-                    )
-                    # Update panel expiry to ensure actual service access is extended
-                    try:
-                        panel_payload = {
-                            "uuid": sub.panel_user_uuid,
-                            "expireAt": new_end_date.isoformat(timespec='milliseconds').replace('+00:00', 'Z'),
-                            "status": "ACTIVE",
-                        }
-                        panel_update_resp = await self.panel_service.update_user_details_on_panel(
-                            sub.panel_user_uuid,
-                            panel_payload,
-                            log_response=True,
-                        )
-                        if panel_update_resp:
-                            logging.info(
-                                f"Panel expiry updated for user {user_id} (panel_uuid {sub.panel_user_uuid}) to {new_end_date}"
-                            )
-                    except Exception as e_panel:
-                        logging.error(
-                            f"Failed to update panel expiry for user {user_id} (panel_uuid {sub.panel_user_uuid}): {e_panel}")
 
-                    # Create a succeeded payment record in DB with the same amount/currency as last tribute payment
-                    try:
-                        last_payment = await payment_dal.get_last_tribute_payment(session, user_id)
-                        if last_payment and last_payment.amount and last_payment.currency:
-                            provider_payment_id = (
-                                f"tribute_auto_{user_id}_{sub.subscription_id}_"
-                                f"{new_end_date.strftime('%Y%m%d')}"
-                            )
-                            created_payment = await payment_dal.ensure_payment_with_provider_id(
-                                session,
-                                user_id=user_id,
-                                amount=float(last_payment.amount),
-                                currency=last_payment.currency,
-                                months=last_tribute_duration,
-                                description="Auto-renewal (panel webhook)",
-                                provider="tribute",
-                                provider_payment_id=provider_payment_id,
-                            )
-                            if created_payment:
-                                logging.info(
-                                    f"Auto-renew payment recorded (id={created_payment.payment_id}) for user {user_id} amount={created_payment.amount} {created_payment.currency} months={last_tribute_duration}"
-                                )
-                        else:
-                            logging.warning(
-                                f"Could not create auto-renew payment for user {user_id}: previous tribute payment not found or missing amount/currency")
-                    except Exception as e_pay:
-                        logging.error(
-                            f"Failed to create auto-renew payment record for user {user_id}: {e_pay}",
-                            exc_info=True,
-                        )
-                    
-                    # Send auto-renewal notification
-                    _ = lambda k, **kw: self.i18n.gettext(lang, k, **kw) if self.i18n else k
-                    auto_renewal_msg = _(
-                        "tribute_auto_renewal",
-                        default="🔄 <b>Подписка автоматически продлена</b>\n\n"
-                               "Ваша подписка Tribute была автоматически продлена на {months} мес.\n"
-                               "Новая дата окончания: {end_date}",
-                        user_name=first_name,
-                        months=last_tribute_duration,
-                        end_date=new_end_date.strftime('%Y-%m-%d')
+            # Anti-duplication: if user already has active sub (end_date > now), skip
+            now_utc = datetime.now(timezone.utc)
+            existing_active = await subscription_dal.get_active_subscriptions_for_user(session, user_id)
+            if any(getattr(s, "end_date", None) and s.end_date > now_utc for s in existing_active):
+                latest_end = max(s.end_date for s in existing_active if s.end_date)
+                logging.info(
+                    f"Expired event dedup: user {user_id} already has active subscription until {latest_end} — skipping auto-renewal"
+                )
+                return True
+
+            # Active (or most-recent) subs for user
+            user_subs = await subscription_dal.get_active_subscriptions_for_user(session, user_id)
+
+            for sub in user_subs:
+                # If panel marked as cancelled (handled by Tribute 'cancelled_subscription'), skip auto-renew
+                if sub.status_from_panel == "CANCELLED":
+                    logging.info(
+                        f"Subscription {sub.subscription_id} for user {user_id} was cancelled, skipping auto-renewal"
                     )
-                    
-                    try:
-                        await self.bot.send_message(
-                            user_id,
-                            auto_renewal_msg,
-                            reply_markup=markup,
-                            parse_mode="HTML"
+                    continue
+
+                # Determine last Tribute duration (months); None if never paid via Tribute
+                last_tribute_duration = await payment_dal.get_last_tribute_payment_duration(session, user_id)
+
+                if last_tribute_duration is None:
+                    continue
+
+                logging.info(
+                    f"Auto-renewing tribute subscription for user {user_id} for {last_tribute_duration} months"
+                )
+
+                # Base extension from the later of current end_date (may include promos/manual ext) or now
+                now_utc = datetime.now(timezone.utc)
+                current_end = getattr(sub, "end_date", None) or now_utc
+                base = current_end if current_end > now_utc else now_utc
+                new_end_date = add_months(base, last_tribute_duration)
+
+                # Update local DB subscription
+                await subscription_dal.update_subscription(
+                    session,
+                    sub.subscription_id,
+                    {
+                        "end_date": new_end_date,
+                        "status_from_panel": "ACTIVE",
+                        "is_active": True,
+                    },
+                )
+
+                # Try to extend expiry on the panel as well (best-effort)
+                try:
+                    panel_payload = {
+                        "uuid": sub.panel_user_uuid,
+                        "expireAt": new_end_date.isoformat(timespec="milliseconds").replace("+00:00", "Z"),
+                        "status": "ACTIVE",
+                    }
+                    _resp = await self.panel_service.update_user_details_on_panel(
+                        sub.panel_user_uuid, panel_payload, log_response=True
+                    )
+                    if _resp:
+                        logging.info(
+                            f"Panel expiry updated for user {user_id} (panel_uuid {sub.panel_user_uuid}) to {new_end_date}"
                         )
-                        auto_renewed = True
-                    except Exception as e:
-                        logging.error(f"Failed to send auto-renewal notification to user {user_id}: {e}")
-                        
+                except Exception as e_panel:
+                    logging.error(
+                        f"Failed to update panel expiry for user {user_id} (panel_uuid {sub.panel_user_uuid}): {e_panel}"
+                    )
+
+                # Record synthetic succeeded payment mirroring last tribute amount/currency (for history/analytics)
+                try:
+                    last_payment = await payment_dal.get_last_tribute_payment(session, user_id)
+                    if last_payment and last_payment.amount and last_payment.currency:
+                        provider_payment_id = f"tribute_auto_{user_id}_{sub.subscription_id}_{new_end_date.strftime('%Y%m%d')}"
+                        await payment_dal.ensure_payment_with_provider_id(
+                            session,
+                            user_id=user_id,
+                            amount=float(last_payment.amount),
+                            currency=last_payment.currency,
+                            months=last_tribute_duration,
+                            description="Tribute auto-renewal",
+                            provider="tribute",
+                            provider_payment_id=provider_payment_id,
+                        )
+                except Exception as e_pay:
+                    logging.error(
+                        f"Failed to record auto-renewal payment for user {user_id}, sub {sub.subscription_id}: {e_pay}"
+                    )
+
+                auto_renewed = True
+                break
+
             await session.commit()
             return auto_renewed
-            
+
         except Exception as e:
-            logging.error(f"Error handling expired subscription for user {user_id}: {e}")
+            logging.error(f"Error handling expired subscription for user {user_id}: {e}", exc_info=True)
             await session.rollback()
             return False
 
@@ -194,10 +201,13 @@ class PanelWebhookService:
                     user_name=first_name,
                     end_date=user_payload.get("expireAt", "")[:10],
                 )
+
         elif event_name == "user.expired":
-            # Check if this is a tribute user that should be auto-renewed (regardless of notification settings)
-            auto_renewed = await self._handle_expired_subscription(session, user_id, user_payload, lang, markup, first_name)
-            
+            async with self.async_session_factory() as session:
+                auto_renewed = await self._handle_expired_subscription(
+                    session, user_id, user_payload, lang, markup, first_name
+                )
+
             # If auto-renewed via Tribute, suppress expiration notification. Otherwise, send it if enabled.
             if not auto_renewed and self.settings.SUBSCRIPTION_NOTIFY_ON_EXPIRE:
                 await self._send_message(
@@ -208,6 +218,7 @@ class PanelWebhookService:
                     user_name=first_name,
                     end_date=user_payload.get("expireAt", "")[:10],
                 )
+
         elif event_name == "user.expired_24_hours_ago" and self.settings.SUBSCRIPTION_NOTIFY_AFTER_EXPIRE:
             await self._send_message(
                 user_id,
@@ -219,6 +230,7 @@ class PanelWebhookService:
             )
 
     async def handle_webhook(self, raw_body: bytes, signature_header: Optional[str]) -> web.Response:
+        # Optional HMAC verification (enabled if secret set)
         if self.settings.PANEL_WEBHOOK_SECRET:
             if not signature_header:
                 return web.Response(status=403, text="no_signature")
@@ -230,6 +242,7 @@ class PanelWebhookService:
             if not hmac.compare_digest(expected_sig, signature_header):
                 return web.Response(status=403, text="invalid_signature")
 
+        # Parse JSON
         try:
             payload = json.loads(raw_body.decode())
         except Exception:
@@ -253,6 +266,7 @@ class PanelWebhookService:
 
         await self.handle_event(event_name, user_data)
         return web.Response(status=200, text="ok")
+
 
 async def panel_webhook_route(request: web.Request):
     service: PanelWebhookService = request.app["panel_webhook_service"]
