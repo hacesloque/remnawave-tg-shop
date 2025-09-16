@@ -46,21 +46,13 @@ def get_main_menu_inline_keyboard(
     if settings.CHANNEL_LINK: builder.row(InlineKeyboardButton(text="🔔 Наш канал: новости и промокоды", url=settings.CHANNEL_LINK))
 
     if settings.SUPPORT_LINK: builder.row(InlineKeyboardButton(text=_(key="menu_support_button"), url=settings.SUPPORT_LINK))
-    language_button = InlineKeyboardButton(
-        text=_(key="menu_language_settings_inline"),
-        callback_data="main_action:language")
-    status_button_list = []
-    if settings.SERVER_STATUS_URL:
-        status_button_list.append(
-            InlineKeyboardButton(text=_(key="menu_server_status_button"),
-                                 url=settings.SERVER_STATUS_URL))
-
-    if status_button_list:
-        builder.row(language_button, *status_button_list)
-    else:
-        builder.row(language_button)
-
-
+    if settings.LANGUAGE_SWITCH_ENABLED:
+        builder.row(
+            InlineKeyboardButton(
+                text=_(key="menu_language_settings_inline"),
+                callback_data="main_action:language"
+            )
+        )
     if settings.TERMS_OF_SERVICE_URL:
         builder.row(
             InlineKeyboardButton(text=_(key="menu_terms_button"),
