@@ -5,6 +5,7 @@ from typing import Optional, List, Dict, Any
 
 
 class Settings(BaseSettings):
+    CHANNEL_LINK: str | None = None
     BOT_TOKEN: str
     ADMIN_IDS_STR: str = Field(
         default="",

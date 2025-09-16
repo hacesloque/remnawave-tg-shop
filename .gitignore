@@ -18,3 +18,14 @@ remnawave-redis-data/
 .DS_Store
 Thumbs.db
 .env
+
+# Local overrides (не коммитим локальные переменные/настройки)
+docker-compose.override.yml
+
+# Backups / temp files (автоматические .bak и пр.)
+*.bak
+*.bak_*
+*.bak.*
+*.new
+*.tmp
+*~
