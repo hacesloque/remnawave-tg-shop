@@ -45,6 +45,9 @@ def get_main_menu_inline_keyboard(
     builder.row(referral_button, promo_button)
     if settings.CHANNEL_LINK: builder.row(InlineKeyboardButton(text="🔔 Наш канал: новости и промокоды", url=settings.CHANNEL_LINK))
 
+    if settings.SERVER_STATUS_URL:
+        builder.row(InlineKeyboardButton(text=_(key="menu_server_status_button"), url=settings.SERVER_STATUS_URL))
+
     if settings.SUPPORT_LINK: builder.row(InlineKeyboardButton(text=_(key="menu_support_button"), url=settings.SUPPORT_LINK))
     if settings.LANGUAGE_SWITCH_ENABLED:
         builder.row(
