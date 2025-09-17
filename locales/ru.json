@@ -1,7 +1,6 @@
 {
   "welcome": "Добро пожаловать, {user_name}!",
-  "main_menu_greeting": "Привет, {user_name}! 👋 Добро пожаловать в <b>NetAway</b>.\nЭто сервис для стабильного и безопасного интернета: быстрый доступ к любимым сайтам, приложениям и онлайн-сервисам без ограничений.\n\n🌍 Доступные серверы:\n🇳🇱 Нидерланды\n\nНе забудьте подписаться на наш канал!✔️",
-
+  "main_menu_greeting": "Привет, {user_name}! 👋 Добро пожаловать в <b>NetAway</b>.\nЭто сервис для стабильного и безопасного интернета: быстрый доступ к любимым сайтам, приложениям и онлайн-сервисам без ограничений.\n\n🌍 Доступные серверы:\n🇳🇱 <a href=\"https://status.netaway.top/status/netaway\">Нидерланды</a>\n\nНе забудьте подписаться на наш канал!✔️",
   "menu_activate_trial_button": "🆓 Пробный период",
   "menu_subscribe_inline": "🚀 Купить",
   "menu_my_subscription_inline": "🔐 Моя подписка",
@@ -11,20 +10,15 @@
   "menu_server_status_button": "📊 Статус",
   "menu_support_button": "💬 Поддержка",
   "menu_terms_button": "📄 Условия сервиса",
-
   "back_to_main_menu_button": "⬅️ Назад",
-
   "choose_language": "Выберите язык / Select language:",
   "language_set_alert": "Язык изменен!",
-
   "error_occurred_try_again": "Произошла ошибка, попробуйте снова.",
   "error_try_again": "Попробуйте еще раз.",
   "error_displaying_menu": "Ошибка отображения меню.",
   "main_menu_unknown_action": "Неизвестное действие.",
-
   "select_subscription_period": "Выберите срок подписки:",
   "subscribe_for_months_button": "{months} мес. - {price} {currency_symbol}",
-
   "choose_payment_method": "Выберите способ оплаты:",
   "pay_button": "💳 Оплатить",
   "pay_with_yookassa_button": "💳 ЮKassa",
@@ -41,7 +35,6 @@
   "payment_failed": "❌ Оплата не удалась или была отменена. Пожалуйста, попробуйте еще раз или свяжитесь с поддержкой.",
   "config_link_not_available": "недоступна, обратитесь в поддержку",
   "traffic_unlimited": "Безлимитный",
-
   "promo_code_prompt": "Пожалуйста, введите ваш промокод:",
   "promo_code_not_found": "Промокод <code>{code}</code> не найден, истек или уже использован максимальное количество раз.",
   "promo_code_already_used_by_user": "Вы уже активировали промокод <code>{code}</code>.",
@@ -63,7 +56,6 @@
   "referral_bonus_inviter_notification_extended": "🎉 Поздравляем! Ваш друг {referee_name} оплатил подписку. Вам начислено {days} бонусных дней! Ваша подписка теперь активна до {new_end_date}.",
   "referral_bonus_inviter_notification_new_sub": "🎉 Поздравляем! Ваш друг {referee_name} оплатил подписку. Вам начислена бонусная подписка на {days} дней! Она активна до {new_end_date}.",
   "user_is_banned": "🚫 Ваш аккаунт заблокирован. Пожалуйста, свяжитесь со службой поддержки.",
-
   "admin_panel_title": "Панель администратора",
   "admin_stats_button": "📊 Статистика",
   "admin_broadcast_button": "📢 Рассылка",
@@ -312,7 +304,6 @@
   "admin_user_subscription_active_until": "⏰ <b>Действует до:</b>",
   "admin_user_subscription_error": "Ошибка загрузки",
   "admin_promo_management_button": "🎟 Управление промокодами",
-
   "admin_promo_management_title": "🎟 <b>Управление промокодами</b>\n\nВыберите промокод для детального просмотра:",
   "admin_promo_management_empty": "📭 Промокоды отсутствуют",
   "admin_promo_card_title": "🎟 <b>Промокод: {code}</b>",
