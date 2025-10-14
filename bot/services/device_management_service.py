@@ -152,7 +152,7 @@ class DeviceManagementService:
             if not user_uuid:
                 return False
             url = f"{self.base}{self.path_hwid_delete}"
-            status, txt = await self._post_json(http, url, {"user_uuid": user_uuid, "hwid": device_hwid})
+            status, txt = await self._post_json(http, url, {"userUuid": user_uuid, "hwid": device_hwid})
             if status in (200, 204):
                 return True
             logging.warning("HWID delete %s -> %s %s", url, status, txt)
