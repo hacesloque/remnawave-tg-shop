@@ -8,8 +8,8 @@ from bot.services.device_management_service import DeviceManagementService
 router = Router(name="devices")
 
 def _title(d: dict) -> str:
-    # Поле названия устройства
-    return d.get("deviceModel") or d.get("model") or d.get("platform") or "Устройство"
+    # Отображаемое имя устройства
+    return d.get("deviceModel") or d.get("model") or d.get("platform") or d.get("userAgent") or "Устройство"
 
 def _id(d: dict) -> str:
     # Для HWID-API идентификатором служит hwid
@@ -36,7 +36,6 @@ async def _render_list(message: Message):
         platform = d.get("platform")
         caption = f"{name}" + (f" · {platform}" if platform else "")
         lines.append("• " + caption)
-        # передаём и id, и читаемое имя (обрежем для callback)
         kb.button(text=caption[:40], callback_data=f"dev:ask:{did}:{(name or 'device')[:40]}")
     kb.adjust(1)
     lines.append("\nЧтобы удалить устройство — нажмите на него.")
