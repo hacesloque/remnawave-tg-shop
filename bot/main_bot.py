@@ -41,6 +41,8 @@ from bot.handlers.admin.sync_admin import perform_sync
 from bot.utils.message_queue import init_queue_manager
 
 
+from bot.handlers.user import devices as devices_handler
+
 async def register_all_routers(dp: Dispatcher, settings: Settings):
     dp.include_router(build_root_router(settings))
     logging.info("All application routers registered.")
@@ -233,6 +235,8 @@ async def run_bot(settings_param: Settings):
         logging.critical(
             "Failed to initialize database connection and session factory. Exiting."
         )
+    dp.include_router(devices_handler.router)
+
         return
     dp, bot, extra = build_dispatcher(settings_param, local_async_session_factory)
     i18n_instance = extra["i18n_instance"]
