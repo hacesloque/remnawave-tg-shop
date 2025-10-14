@@ -39,17 +39,43 @@ class DeviceManagementService:
             txt = await r.text()
             return r.status, txt
 
+    
     async def _resolve_user_uuid(self, session: aiohttp.ClientSession, tg_user_id: int) -> Optional[str]:
+        # 1) основной запрос: /users?telegram_id={tg_id}
         url = f"{self.base}{self.path_find_user.format(tg_id=tg_user_id)}"
         data = await self._get_json(session, url)
-        if not data:
+        def pick_uuid(data):
+            if not isinstance(data, dict): 
+                return None
+            resp = data.get("response") if isinstance(data, dict) else None
+            users = resp.get("users") if isinstance(resp, dict) else None
+            if not isinstance(users, list): 
+                return None
+            # Ищем точное совпадение по telegram_id / telegramId
+            for u in users:
+                if str(u.get("telegram_id") or u.get("telegramId") or "") == str(tg_user_id):
+                    return u.get("uuid")
+            # Фолбэк: username == f"tg_{tg_user_id}"
+            cand = f"tg_{tg_user_id}"
+            for u in users:
+                if str(u.get("username") or "") == cand:
+                    return u.get("uuid")
+            # Если единственная запись — берём её, иначе None
+            if len(users) == 1:
+                return users[0].get("uuid")
             return None
-        resp = data.get("response") if isinstance(data, dict) else None
-        users = resp.get("users") if isinstance(resp, dict) else None
-        if isinstance(users, list) and users:
-            uuid = users[0].get("uuid")
+
+        uuid = pick_uuid(data) if data else None
+        if uuid:
             return uuid
-        return None
+
+        # 2) фолбэк: /users?username=tg_{tg_id}
+        try_user = f"tg_{tg_user_id}"
+        url2 = f"{self.base}/users?username={try_user}"
+        data2 = await self._get_json(session, url2)
+        uuid2 = pick_uuid(data2) if data2 else None
+        return uuid2
+
 
     async def list_devices(self, tg_user_id: int) -> List[Dict[str, Any]]:
         async with aiohttp.ClientSession(headers=self._headers()) as session:
