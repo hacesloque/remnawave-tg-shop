@@ -1,6 +1,7 @@
 import aiohttp
 import logging
 from typing import Any, Dict, List, Optional
+from sqlalchemy.ext.asyncio import AsyncSession
 from config.settings import get_settings
 
 class DeviceManagementService:
@@ -59,7 +60,24 @@ class DeviceManagementService:
             txt = await r.text()
             return r.status, txt
 
-    async def _resolve_user_uuid(self, session: aiohttp.ClientSession, tg_user_id: int) -> Optional[str]:
+    
+    async def _resolve_user_uuid_from_db(self, session: AsyncSession, tg_user_id: int) -> Optional[str]:
+        """
+        Пытаемся взять user_uuid из нашей БД:
+        SELECT panel_user_uuid FROM users WHERE user_id = :tg_user_id
+        """
+        try:
+            res = await session.execute(
+                __import__('sqlalchemy').text("SELECT panel_user_uuid FROM users WHERE user_id = :uid LIMIT 1"),
+                {"uid": tg_user_id}
+            )
+            row = res.first()
+            if row and row[0]:
+                return str(row[0])
+        except Exception as e:
+            logging.warning("DB resolve user_uuid failed: %s", e)
+        return None
+async def _resolve_user_uuid(self, session: aiohttp.ClientSession, tg_user_id: int) -> Optional[str]:
         """
         Универсально для ЛЮБОГО пользователя:
         1) точный поиск по username=tg_{id}
@@ -98,26 +116,26 @@ class DeviceManagementService:
         uuid = pick_uuid_strict(data_tg, tg_id=tg_user_id)
         return uuid
 
-    async def list_devices(self, tg_user_id: int) -> List[Dict[str, Any]]:
+    async def list_devices(self, tg_user_id: int, session: Optional[AsyncSession] = None) -> List[Dict[str, Any]]:
         async with aiohttp.ClientSession(headers=self._headers()) as session:
-            user_uuid = await self._resolve_user_uuid(session, tg_user_id)
+            user_uuid = db_uuid or await self._resolve_user_uuid(http, tg_user_id)
             if not user_uuid:
                 return []
             url = f"{self.base}{self.path_hwid_list.format(user_uuid=user_uuid)}"
-            data = await self._get_json(session, url)
+            data = await self._get_json(http, url)
             if not data:
                 return []
             resp = data.get("response") if isinstance(data, dict) else None
             devs = resp.get("devices") if isinstance(resp, dict) else None
             return devs or []
 
-    async def delete_device(self, tg_user_id: int, device_hwid: str) -> bool:
+    async def delete_device(self, tg_user_id: int, device_hwid: str, session: Optional[AsyncSession] = None) -> bool:
         async with aiohttp.ClientSession(headers=self._headers()) as session:
-            user_uuid = await self._resolve_user_uuid(session, tg_user_id)
+            user_uuid = db_uuid or await self._resolve_user_uuid(http, tg_user_id)
             if not user_uuid:
                 return False
             url = f"{self.base}{self.path_hwid_delete}"
-            status, txt = await self._post_json(session, url, {"user_uuid": user_uuid, "hwid": device_hwid})
+            status, txt = await self._post_json(http, url, {"user_uuid": user_uuid, "hwid": device_hwid})
             if status in (200, 204):
                 return True
             logging.warning("DELETE(HWID) %s -> %s %s", url, status, txt)
