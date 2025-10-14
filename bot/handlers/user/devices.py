@@ -31,9 +31,12 @@ async def _render_list(message: Message, session: AsyncSession):
     devices = await svc.list_devices(message.from_user.id, session=session)
 
     if not devices:
+        kb = InlineKeyboardBuilder()
+        kb.button(text="⬅️ Назад", callback_data="back")
         await message.answer(
             "У вас пока нет сохранённых устройств.\n\n"
-            "Если вы подключались раньше — перезапустите приложение и обновите профиль."
+            "Если вы подключались раньше — перезапустите приложение и обновите профиль.",
+            reply_markup=kb.as_markup()
         )
         return
 
@@ -47,6 +50,8 @@ async def _render_list(message: Message, session: AsyncSession):
         cb = f"d:{hw}"[:64]
         kb.button(text=_title(d), callback_data=cb)
 
+    # Кнопка «Назад» внизу
+    kb.button(text="⬅️ Назад", callback_data="back")
     kb.adjust(1)
     await message.answer("\\n".join(lines), reply_markup=kb.as_markup())
 
@@ -76,15 +81,21 @@ async def do_delete(call: CallbackQuery, session: AsyncSession):
         left = await svc.list_devices(call.from_user.id, session=session)
         if left:
             await call.message.edit_text("Готово. Устройство удалено ✅")
+            # показываем обновлённый список
             await _render_list(call.message, session)
         else:
             # Ничего больше не показываем — только подтверждение
             await call.message.edit_text("Готово. Устройство удалено ✅")
         return
-    # Ошибка удаления
     await call.message.edit_text("Не удалось удалить устройство. Попробуйте позже.")
 
 @router.callback_query(F.data == "n")
 async def cancel_delete(call: CallbackQuery, session: AsyncSession):
     await call.message.edit_text("Удаление отменено.")
     await _render_list(call.message, session)
+
+@router.callback_query(F.data == "back")
+async def go_back(call: CallbackQuery, session: AsyncSession):
+    # Возвращаемся в главное меню
+    await call.message.edit_text("Открываю главное меню…")
+    await call.message.bot.send_message(call.message.chat.id, "/start")
