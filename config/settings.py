@@ -361,3 +361,16 @@ def get_settings() -> Settings:
                 f"CRITICAL SETTINGS ERROR: {e}. Please check your .env file and Settings model."
             )
     return _settings_instance
+
+# ==== Retention auto-messages (ENV flags) ====
+import os
+
+RETENTION_ENABLED = os.getenv("RETENTION_ENABLED", "false").lower() == "true"
+RETENTION_SEND_WINDOW = os.getenv("RETENTION_SEND_WINDOW", "09:00-22:00")
+RETENTION_MAX_PER_TICK = int(os.getenv("RETENTION_MAX_PER_TICK", "20"))
+RETENTION_SLEEP_SEC = int(os.getenv("RETENTION_SLEEP_SEC", "30"))
+RETENTION_SUPPORT_URL = os.getenv("RETENTION_SUPPORT_URL", "https://t.me/NetAwayHelper")
+RETENTION_TEMPLATES_LANG = os.getenv("RETENTION_TEMPLATES_LANG", "ru")
+
+# Retention scheduler flag
+RETENTION_SCHEDULER_ENABLED = os.getenv("RETENTION_SCHEDULER_ENABLED", "false").lower() == "true"

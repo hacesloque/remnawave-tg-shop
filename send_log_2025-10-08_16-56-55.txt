@@ -1,0 +1,4 @@
+resp: {"ok":false,"error_code":400,"description":"Bad Request: message text is empty"}
+fail:  (400: Bad Request: message text is empty)
+-----
+Done. Sent:  | Success:  | Failed: 1

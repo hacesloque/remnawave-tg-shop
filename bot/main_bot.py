@@ -236,6 +236,16 @@ async def run_bot(settings_param: Settings):
         return
     dp, bot, extra = build_dispatcher(settings_param, local_async_session_factory)
     i18n_instance = extra["i18n_instance"]
+    # === Retention auto-messages loop ===
+    from bot.retention.worker import retention_loop
+    asyncio.create_task(retention_loop(bot, local_async_session_factory))
+    import logging; logging.info("[retention] task scheduled")
+    # === Retention scheduler loop ===
+    from bot.retention.scheduler import scheduler_loop
+    from config.settings import RETENTION_SCHEDULER_ENABLED
+    if RETENTION_SCHEDULER_ENABLED:
+        asyncio.create_task(scheduler_loop(local_async_session_factory))
+        import logging; logging.info("[retention][scheduler] task scheduled")
 
     # Get bot username for YooKassa default return URL if needed
     actual_bot_username = "your_bot_username"

@@ -311,3 +311,25 @@ async def cancel_trial_activation(
     await send_main_menu(
         callback, settings, i18n_data, subscription_service, session, is_edit=True
     )
+
+# --- Retention button support: "Получить триал" (TRIAL_START) ---
+from aiogram import F, types
+
+@router.callback_query(F.data == "TRIAL_START")
+async def retention_trial_start_handler(
+    callback: types.CallbackQuery,
+    i18n_data: dict,
+    settings,
+    session,
+    subscription_service,
+    notification_service
+):
+    """
+    Нажатие на кнопку из ретеншен-сообщения.
+    Используем ту же логику, что и main_action:request_trial.
+    """
+    # Переиспользуем существующий поток активации
+    from .trial_handler import request_trial_confirmation_handler
+    return await request_trial_confirmation_handler(
+        callback, i18n_data, settings, session, subscription_service, notification_service
+    )
