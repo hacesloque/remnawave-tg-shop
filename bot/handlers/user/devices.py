@@ -9,7 +9,6 @@ from bot.services.device_management_service import DeviceManagementService
 router = Router(name="devices")
 
 def _title(d: dict) -> str:
-    # Короткий, человеко-читаемый заголовок
     model = d.get("deviceModel") or d.get("model") or ""
     plat = d.get("platform") or ""
     parts = []
@@ -18,11 +17,9 @@ def _title(d: dict) -> str:
     if model:
         parts.append(str(model))
     title = " • ".join(parts) or "Устройство"
-    # Телеграм ограничивает длину подписи кнопки ~64-70 символами
     return (title[:60] + "…") if len(title) > 61 else title
 
 def _hwid(d: dict) -> str:
-    # Для HWID-API идентификатором служит hwid (обычно 16..36 символов)
     return str(d.get("hwid") or "")
 
 @router.message(Command("devices"))
@@ -47,17 +44,15 @@ async def _render_list(message: Message, session: AsyncSession):
         hw = _hwid(d)
         if not hw:
             continue
-        # callback_data <= 64 байт: префикс 2 символа + hwid
         cb = f"d:{hw}"[:64]
         kb.button(text=_title(d), callback_data=cb)
 
     kb.adjust(1)
-    await message.answer("\n".join(lines), reply_markup=kb.as_markup())
+    await message.answer("\\n".join(lines), reply_markup=kb.as_markup())
 
-# Шаг подтверждения удаления
 @router.callback_query(F.data.startswith("d:"))
 async def ask_delete(call: CallbackQuery, session: AsyncSession):
-    hw = call.data[2:64]  # без префикса
+    hw = call.data[2:64]
     if not hw:
         await call.answer("Некорректное устройство", show_alert=True)
         return
@@ -66,25 +61,29 @@ async def ask_delete(call: CallbackQuery, session: AsyncSession):
     kb.button(text="❌ Отмена", callback_data="n")
     kb.adjust(2)
     await call.message.edit_text(
-        f"Удалить устройство?\n\n`{hw}`",
+        f"Удалить устройство?\\n\\n`{hw}`",
         reply_markup=kb.as_markup(),
         parse_mode="Markdown",
     )
 
-# Выполнить удаление
 @router.callback_query(F.data.startswith("y:"))
 async def do_delete(call: CallbackQuery, session: AsyncSession):
     hw = call.data[2:64]
     svc = DeviceManagementService()
     ok = await svc.delete_device(call.from_user.id, hw, session=session)
     if ok:
-        await call.message.edit_text("Готово. Устройство удалено ✅")
-    else:
-        await call.message.edit_text("Не удалось удалить устройство. Попробуйте позже.")
-    # Показать обновлённый список следом
-    await _render_list(call.message, session)
+        # Проверяем, остались ли ещё устройства
+        left = await svc.list_devices(call.from_user.id, session=session)
+        if left:
+            await call.message.edit_text("Готово. Устройство удалено ✅")
+            await _render_list(call.message, session)
+        else:
+            # Ничего больше не показываем — только подтверждение
+            await call.message.edit_text("Готово. Устройство удалено ✅")
+        return
+    # Ошибка удаления
+    await call.message.edit_text("Не удалось удалить устройство. Попробуйте позже.")
 
-# Отмена
 @router.callback_query(F.data == "n")
 async def cancel_delete(call: CallbackQuery, session: AsyncSession):
     await call.message.edit_text("Удаление отменено.")
