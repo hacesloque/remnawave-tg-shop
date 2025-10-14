@@ -21,6 +21,8 @@ def get_main_menu_inline_keyboard(
     builder.row(
         InlineKeyboardButton(text=_(key="menu_subscribe_inline"),
                              callback_data="main_action:subscribe"))
+
+    # 🔐 Моя подписка
     if settings.SUBSCRIPTION_MINI_APP_URL:
         builder.row(
             InlineKeyboardButton(
@@ -28,11 +30,25 @@ def get_main_menu_inline_keyboard(
                 web_app=WebAppInfo(url=settings.SUBSCRIPTION_MINI_APP_URL),
             )
         )
+        # 📱 Управление устройствами — РОВНО ПОД "Моя подписка"
+        builder.row(
+            InlineKeyboardButton(
+                text="📱 Управление устройствами",
+                callback_data="devices_open",
+            )
+        )
     else:
         builder.row(
             InlineKeyboardButton(
                 text=_(key="menu_my_subscription_inline"),
                 callback_data="main_action:my_subscription",
+            )
+        )
+        # 📱 Управление устройствами — РОВНО ПОД "Моя подписка"
+        builder.row(
+            InlineKeyboardButton(
+                text="📱 Управление устройствами",
+                callback_data="devices_open",
             )
         )
 
@@ -43,12 +59,22 @@ def get_main_menu_inline_keyboard(
         text=_(key="menu_apply_promo_button"),
         callback_data="main_action:apply_promo")
     builder.row(referral_button, promo_button)
-    if settings.CHANNEL_LINK: builder.row(InlineKeyboardButton(text="🔔 Наш канал: новости и промокоды", url=settings.CHANNEL_LINK))
+
+    if settings.CHANNEL_LINK:
+        builder.row(InlineKeyboardButton(
+            text="🔔 Наш канал: новости и промокоды",
+            url=settings.CHANNEL_LINK))
 
     if settings.SERVER_STATUS_URL:
-        builder.row(InlineKeyboardButton(text=_(key="menu_server_status_button"), url=settings.SERVER_STATUS_URL))
+        builder.row(InlineKeyboardButton(
+            text=_(key="menu_server_status_button"),
+            url=settings.SERVER_STATUS_URL))
 
-    if settings.SUPPORT_LINK: builder.row(InlineKeyboardButton(text=_(key="menu_support_button"), url=settings.SUPPORT_LINK))
+    if settings.SUPPORT_LINK:
+        builder.row(InlineKeyboardButton(
+            text=_(key="menu_support_button"),
+            url=settings.SUPPORT_LINK))
+
     if settings.LANGUAGE_SWITCH_ENABLED:
         builder.row(
             InlineKeyboardButton(
@@ -56,14 +82,13 @@ def get_main_menu_inline_keyboard(
                 callback_data="main_action:language"
             )
         )
+
     if settings.TERMS_OF_SERVICE_URL:
         builder.row(
             InlineKeyboardButton(text=_(key="menu_terms_button"),
                                  url=settings.TERMS_OF_SERVICE_URL))
 
     return builder.as_markup()
-
-
 def get_language_selection_keyboard(i18n_instance,
                                     current_lang: str) -> InlineKeyboardMarkup:
     _ = lambda key, **kwargs: i18n_instance.gettext(current_lang, key, **kwargs
