@@ -2,19 +2,32 @@ from aiogram import Router, F
 from aiogram.types import Message, CallbackQuery
 from aiogram.filters import Command
 from aiogram.utils.keyboard import InlineKeyboardBuilder
-from config.settings import get_settings
-from bot.services.device_management_service import DeviceManagementService
 from sqlalchemy.ext.asyncio import AsyncSession
+
+from bot.services.device_management_service import DeviceManagementService
 
 router = Router(name="devices")
 
 def _title(d: dict) -> str:
-    # Отображаемое имя устройства
-    return d.get("deviceModel") or d.get("model") or d.get("platform") or d.get("userAgent") or "Устройство"
+    # Короткий, человеко-читаемый заголовок
+    model = d.get("deviceModel") or d.get("model") or ""
+    plat = d.get("platform") or ""
+    parts = []
+    if plat:
+        parts.append(str(plat))
+    if model:
+        parts.append(str(model))
+    title = " • ".join(parts) or "Устройство"
+    # Телеграм ограничивает длину подписи кнопки ~64-70 символами
+    return (title[:60] + "…") if len(title) > 61 else title
 
-def _id(d: dict) -> str:
-    # Для HWID-API идентификатором служит hwid
-    return str(d.get("hwid") or d.get("id") or d.get("uuid") or "")
+def _hwid(d: dict) -> str:
+    # Для HWID-API идентификатором служит hwid (обычно 16..36 символов)
+    return str(d.get("hwid") or "")
+
+@router.message(Command("devices"))
+async def devices_entry(msg: Message, session: AsyncSession):
+    await _render_list(msg, session)
 
 async def _render_list(message: Message, session: AsyncSession):
     svc = DeviceManagementService()
@@ -28,59 +41,51 @@ async def _render_list(message: Message, session: AsyncSession):
         return
 
     kb = InlineKeyboardBuilder()
-    lines = ["Ваши устройства:\n"]
+    lines = ["Ваши устройства:\n", "Чтобы удалить устройство — нажмите на его название."]
+
     for d in devices:
-        did = _id(d)
-        if not did:
+        hw = _hwid(d)
+        if not hw:
             continue
-        name = _title(d)
-        platform = d.get("platform")
-        caption = f"{name}" + (f" · {platform}" if platform else "")
-        lines.append("• " + caption)
-        kb.button(text=caption[:40], callback_data=f"dev:ask:{did}:{(name or 'device')[:40]}")
+        # callback_data <= 64 байт: префикс 2 символа + hwid
+        cb = f"d:{hw}"[:64]
+        kb.button(text=_title(d), callback_data=cb)
+
     kb.adjust(1)
-    lines.append("\nЧтобы удалить устройство — нажмите на него.")
     await message.answer("\n".join(lines), reply_markup=kb.as_markup())
 
-@router.message(Command("devices"))
-async def devices_entry(msg: Message, session: AsyncSession):
-    s = get_settings()
-    if not getattr(s, "DEVICES_MANAGEMENT_ENABLED", False):
-        await msg.answer("Управление устройствами временно недоступно.")
-        return
-    await _render_list(msg, session)
-
-@router.callback_query(F.data.startswith("dev:ask:"))
+# Шаг подтверждения удаления
+@router.callback_query(F.data.startswith("d:"))
 async def ask_delete(call: CallbackQuery, session: AsyncSession):
-    s = get_settings()
-    if not getattr(s, "DEVICES_MANAGEMENT_ENABLED", False):
-        await call.answer("Сейчас недоступно", show_alert=True)
+    hw = call.data[2:64]  # без префикса
+    if not hw:
+        await call.answer("Некорректное устройство", show_alert=True)
         return
-    _, _, dev_id, name = call.data.split(":", 3)
     kb = InlineKeyboardBuilder()
-    kb.button(text="✅ Да, удалить", callback_data=f"dev:confirm:{dev_id}")
-    kb.button(text="❌ Нет", callback_data="dev:cancel")
+    kb.button(text="✅ Да, удалить", callback_data=f"y:{hw}"[:64])
+    kb.button(text="❌ Отмена", callback_data="n")
     kb.adjust(2)
-    await call.message.answer(f"Удалить устройство «{name}»?", reply_markup=kb.as_markup())
-    await call.answer()
+    await call.message.edit_text(
+        f"Удалить устройство?\n\n`{hw}`",
+        reply_markup=kb.as_markup(),
+        parse_mode="Markdown",
+    )
 
-@router.callback_query(F.data == "dev:cancel")
-async def cancel(call: CallbackQuery):
-    await call.answer("Отменено")
-
-@router.callback_query(F.data.startswith("dev:confirm:"))
+# Выполнить удаление
+@router.callback_query(F.data.startswith("y:"))
 async def do_delete(call: CallbackQuery, session: AsyncSession):
-    s = get_settings()
-    if not getattr(s, "DEVICES_MANAGEMENT_ENABLED", False):
-        await call.answer("Сейчас недоступно", show_alert=True)
-        return
-    dev_id = call.data.split(":", 2)[2]
+    hw = call.data[2:64]
     svc = DeviceManagementService()
-    ok = await svc.delete_device(call.from_user.id, dev_id, session=session)
+    ok = await svc.delete_device(call.from_user.id, hw, session=session)
     if ok:
-        await call.answer("Удалено")
-        await call.message.answer("Устройство удалено. Обновляю список…")
-        await _render_list(call.message, session)
+        await call.message.edit_text("Готово. Устройство удалено ✅")
     else:
-        await call.answer("Ошибка", show_alert=True)
-        await call.message.answer("Не удалось удалить устройство. Попробуйте позже или напишите в поддержку.")
+        await call.message.edit_text("Не удалось удалить устройство. Попробуйте позже.")
+    # Показать обновлённый список следом
+    await _render_list(call.message, session)
+
+# Отмена
+@router.callback_query(F.data == "n")
+async def cancel_delete(call: CallbackQuery, session: AsyncSession):
+    await call.message.edit_text("Удаление отменено.")
+    await _render_list(call.message, session)
