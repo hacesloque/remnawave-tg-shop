@@ -43,6 +43,8 @@ from bot.handlers.user import devices as devices_handler
 
 
 async def register_all_routers(dp: Dispatcher, settings: Settings):
+    if getattr(settings, 'DEVICES_MANAGEMENT_ENABLED', False):
+        dp.include_router(devices_handler.router)
     dp.include_router(build_root_router(settings))
     logging.info("All application routers registered.")
 
