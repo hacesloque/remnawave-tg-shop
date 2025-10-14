@@ -5,6 +5,11 @@ from typing import Optional, List, Dict, Any
 
 
 class Settings(BaseSettings):
+    DEVICES_MANAGEMENT_ENABLED: bool = False
+    DEVICES_API_MODE: str = 'HWID'
+    PANEL_FIND_USER_BY_TG_PATH: str = '/users?telegram_id={tg_id}'
+    PANEL_DEVICES_LIST_PATH: str = '/hwid/devices/{user_uuid}'
+    PANEL_DEVICE_DELETE_PATH: str = '/hwid/devices/delete'
     LANGUAGE_SWITCH_ENABLED: bool = True
     CHANNEL_LINK: str | None = None
     BOT_TOKEN: str
