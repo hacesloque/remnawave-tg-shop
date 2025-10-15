@@ -331,6 +331,7 @@ class Settings(BaseSettings):
     LOG_TRIAL_ACTIVATIONS: bool = Field(default=True, description="Send notifications for trial activations")
     LOG_SUSPICIOUS_ACTIVITY: bool = Field(default=True, description="Send notifications for suspicious promo attempts")
 
+    PROMOCODE_TEXT_INPUT_ENABLED: bool = Field(default=False, description="Enable promo code activation from plain text messages")
     model_config = SettingsConfigDict(env_file='.env',
                                       env_file_encoding='utf-8',
                                       extra='ignore',
@@ -380,3 +381,11 @@ RETENTION_TEMPLATES_LANG = os.getenv("RETENTION_TEMPLATES_LANG", "ru")
 
 # Retention scheduler flag
 RETENTION_SCHEDULER_ENABLED = os.getenv("RETENTION_SCHEDULER_ENABLED", "false").lower() == "true"
+
+# ==== Support forwarding ====
+SUPPORT_FORWARD_ENABLED = os.getenv("SUPPORT_FORWARD_ENABLED", "false").lower() == "true"
+SUPPORT_INBOX_CHAT_ID = int(os.getenv("SUPPORT_INBOX_CHAT_ID", "0") or 0)
+
+# ==== Promo code text input flag ====
+import os
+PROMOCODE_TEXT_INPUT_ENABLED = os.getenv("PROMOCODE_TEXT_INPUT_ENABLED", "false").lower() == "true"
