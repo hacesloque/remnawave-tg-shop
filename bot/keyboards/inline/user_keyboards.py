@@ -13,52 +13,102 @@ def get_main_menu_inline_keyboard(
     _ = lambda key, **kwargs: i18n_instance.gettext(lang, key, **kwargs)
     builder = InlineKeyboardBuilder()
 
+    # 🆓 Пробный период (если включён)
     if show_trial_button and settings.TRIAL_ENABLED:
         builder.row(
-            InlineKeyboardButton(text=_(key="menu_activate_trial_button"),
-                                 callback_data="main_action:request_trial"))
+            InlineKeyboardButton(
+                text=_(key="menu_activate_trial_button"),
+                callback_data="main_action:request_trial",
+            )
+        )
 
-    builder.row(
-        InlineKeyboardButton(text=_(key="menu_subscribe_inline"),
-                             callback_data="main_action:subscribe"))
+    # 🚀 Купить
     builder.row(
         InlineKeyboardButton(
-            text=_(key="menu_my_subscription_inline"),
-            callback_data="main_action:my_subscription",
+            text=_(key="menu_subscribe_inline"),
+            callback_data="main_action:subscribe",
         )
     )
 
+    # 🔐 Моя подписка
+    if getattr(settings, "SUBSCRIPTION_MINI_APP_URL", None):
+        builder.row(
+            InlineKeyboardButton(
+                text=_(key="menu_my_subscription_inline"),
+                web_app=WebAppInfo(url=settings.SUBSCRIPTION_MINI_APP_URL),
+            )
+        )
+    else:
+        builder.row(
+            InlineKeyboardButton(
+                text=_(key="menu_my_subscription_inline"),
+                callback_data="main_action:my_subscription",
+            )
+        )
+
+    # 📱 Управление устройствами — сразу под "Моя подписка"
+    builder.row(
+        InlineKeyboardButton(
+            text="📱 Управление устройствами",
+            callback_data="devices_open",
+        )
+    )
+
+    # 🎁 Рефералы | 🎟 Промокод
     referral_button = InlineKeyboardButton(
         text=_(key="menu_referral_inline"),
-        callback_data="main_action:referral")
+        callback_data="main_action:referral",
+    )
     promo_button = InlineKeyboardButton(
         text=_(key="menu_apply_promo_button"),
-        callback_data="main_action:apply_promo")
+        callback_data="main_action:apply_promo",
+    )
     builder.row(referral_button, promo_button)
 
-    language_button = InlineKeyboardButton(
-        text=_(key="menu_language_settings_inline"),
-        callback_data="main_action:language")
-    status_button_list = []
-    if settings.SERVER_STATUS_URL:
-        status_button_list.append(
-            InlineKeyboardButton(text=_(key="menu_server_status_button"),
-                                 url=settings.SERVER_STATUS_URL))
-
-    if status_button_list:
-        builder.row(language_button, *status_button_list)
-    else:
-        builder.row(language_button)
-
-    if settings.SUPPORT_LINK:
+    # 🔔 Наш канал: новости и промокоды
+    if getattr(settings, "CHANNEL_LINK", None):
         builder.row(
-            InlineKeyboardButton(text=_(key="menu_support_button"),
-                                 url=settings.SUPPORT_LINK))
+            InlineKeyboardButton(
+                text="🔔 Наш канал: новости и промокоды",
+                url=settings.CHANNEL_LINK,
+            )
+        )
 
-    if settings.TERMS_OF_SERVICE_URL:
+    # 📊 Статус (если есть ссылка)
+    if getattr(settings, "SERVER_STATUS_URL", None):
         builder.row(
-            InlineKeyboardButton(text=_(key="menu_terms_button"),
-                                 url=settings.TERMS_OF_SERVICE_URL))
+            InlineKeyboardButton(
+                text=_(key="menu_server_status_button"),
+                url=settings.SERVER_STATUS_URL,
+            )
+        )
+
+    # 💬 Поддержка
+    if getattr(settings, "SUPPORT_LINK", None):
+        builder.row(
+            InlineKeyboardButton(
+                text=_(key="menu_support_button"),
+                url=settings.SUPPORT_LINK,
+            )
+        )
+
+    # 🌐 Язык (если включён переключатель)
+    if getattr(settings, "LANGUAGE_SWITCH_ENABLED", False):
+        builder.row(
+            InlineKeyboardButton(
+                text=_(key="menu_language_settings_inline"),
+                callback_data="main_action:language",
+            )
+        )
+
+    # 📄 Условия сервиса
+    if getattr(settings, "TERMS_OF_SERVICE_URL", None):
+        builder.row(
+            InlineKeyboardButton(
+                text=_(key="menu_terms_button"),
+                url=settings.TERMS_OF_SERVICE_URL,
+            )
+        )
 
     return builder.as_markup()
 
