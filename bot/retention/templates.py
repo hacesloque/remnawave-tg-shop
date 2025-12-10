@@ -81,5 +81,19 @@ TEMPLATES = {
                 [{"text": "Помощь", "url": RETENTION_SUPPORT_URL}]
             ]
         }
+    },
+    "C1": {
+        "text": (
+            "Привет, это NetAway👋\n"
+            "Давно не виделись! За это время мы успели многое улучшить — ускорили соединение "
+            "и усилили блокировку рекламы 🚀\n"
+            "Возвращайся с промокодом WELCOMEBACK — получи 7 дней бесплатно 💚"
+        ),
+        "reply_markup": {
+            "inline_keyboard": [
+                [{"text": "Продлить подписку", "callback_data": "main_action:subscription"}],
+                [{"text": "Помощь", "url": RETENTION_SUPPORT_URL}]
+            ]
+        }
     }
 }
