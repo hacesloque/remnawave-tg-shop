@@ -12,6 +12,7 @@ from .referral_service import ReferralService
 from bot.middlewares.i18n import JsonI18n
 from .notification_service import NotificationService
 from bot.keyboards.inline.user_keyboards import get_connect_and_main_keyboard
+from bot.utils.text_sanitizer import sanitize_display_name, username_for_display
 
 
 class StarsService:
@@ -109,8 +110,9 @@ class StarsService:
         if not final_end:
             final_end = activation_details["end_date"]
 
-        current_lang = i18n_data.get("current_language",
-                                     self.settings.DEFAULT_LANGUAGE)
+        # Always use user's language from DB for user-facing messages
+        db_user = await user_dal.get_user_by_id(session, message.from_user.id)
+        current_lang = db_user.language_code if db_user and db_user.language_code else self.settings.DEFAULT_LANGUAGE
         i18n: JsonI18n = i18n_data.get("i18n_instance")
         _ = lambda k, **kw: i18n.gettext(current_lang, k, **kw) if i18n else k
 
@@ -123,10 +125,12 @@ class StarsService:
             db_user = await user_dal.get_user_by_id(session, message.from_user.id)
             if db_user and db_user.referred_by_id:
                 inviter = await user_dal.get_user_by_id(session, db_user.referred_by_id)
-                if inviter and inviter.first_name:
-                    inviter_name_display = inviter.first_name
-                elif inviter and inviter.username:
-                    inviter_name_display = f"@{inviter.username}"
+                if inviter:
+                    safe_name = sanitize_display_name(inviter.first_name) if inviter.first_name else None
+                    if safe_name:
+                        inviter_name_display = safe_name
+                    elif inviter.username:
+                        inviter_name_display = username_for_display(inviter.username, with_at=False)
             success_msg = _(
                 "payment_successful_with_referral_bonus_full",
                 months=months,
@@ -144,7 +148,7 @@ class StarsService:
                 config_link=config_link,
             )
         markup = get_connect_and_main_keyboard(
-            current_lang, i18n, self.settings, config_link
+            current_lang, i18n, self.settings, config_link, preserve_message=True
         )
         try:
             await self.bot.send_message(
@@ -172,4 +176,3 @@ class StarsService:
             )
         except Exception as e:
             logging.error(f"Failed to send stars payment notification: {e}")
-

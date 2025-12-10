@@ -31,6 +31,12 @@ class Settings(BaseSettings):
     SUPPORT_LINK: Optional[str] = Field(default=None)
     SERVER_STATUS_URL: Optional[str] = Field(default=None)
     TERMS_OF_SERVICE_URL: Optional[str] = Field(default=None)
+    REQUIRED_CHANNEL_ID: Optional[int] = Field(
+        default=None,
+        description="Telegram channel ID the user must join to access the bot")
+    REQUIRED_CHANNEL_LINK: Optional[str] = Field(
+        default=None,
+        description="Public username or invite link to the required channel for join button")
 
     YOOKASSA_SHOP_ID: Optional[str] = None
     YOOKASSA_SECRET_KEY: Optional[str] = None
@@ -38,8 +44,15 @@ class Settings(BaseSettings):
 
     YOOKASSA_DEFAULT_RECEIPT_EMAIL: Optional[str] = Field(default=None)
     YOOKASSA_VAT_CODE: int = Field(default=1)
+    # Deprecated: explicit receipt fields are now derived from YOOKASSA_AUTOPAYMENTS_ENABLED
     YOOKASSA_PAYMENT_MODE: str = Field(default="full_prepayment")
     YOOKASSA_PAYMENT_SUBJECT: str = Field(default="service")
+    # Single toggle to enable recurring payments (saving cards, managing payment methods, auto-renew)
+    YOOKASSA_AUTOPAYMENTS_ENABLED: bool = Field(default=False)
+    YOOKASSA_AUTOPAYMENTS_REQUIRE_CARD_BINDING: bool = Field(
+        default=True,
+        description="When true, new YooKassa payments in autopay mode force card binding without a user checkbox."
+    )
 
     WEBHOOK_BASE_URL: Optional[str] = None
 
@@ -48,6 +61,15 @@ class Settings(BaseSettings):
     CRYPTOPAY_CURRENCY_TYPE: str = Field(default="fiat")
     CRYPTOPAY_ASSET: str = Field(default="RUB")
     CRYPTOPAY_ENABLED: bool = Field(default=True)
+
+    FREEKASSA_ENABLED: bool = Field(default=False)
+    FREEKASSA_MERCHANT_ID: Optional[str] = None
+    FREEKASSA_FIRST_SECRET: Optional[str] = None
+    FREEKASSA_SECOND_SECRET: Optional[str] = None
+    FREEKASSA_PAYMENT_URL: str = Field(default="https://pay.freekassa.ru/")
+    FREEKASSA_API_KEY: Optional[str] = None
+    FREEKASSA_PAYMENT_IP: Optional[str] = None
+    FREEKASSA_PAYMENT_METHOD_ID: Optional[int] = None
 
     YOOKASSA_ENABLED: bool = Field(default=True)
     STARS_ENABLED: bool = Field(default=True)
@@ -104,7 +126,11 @@ class Settings(BaseSettings):
     # Referral program configuration
     REFERRAL_ONE_BONUS_PER_REFEREE: bool = Field(
         default=True,
-        description="When true, referral bonuses (for inviter and referee) are applied only once per invited user – on their first successful payment."
+        description="When true, referral bonuses (for inviter and referee) are applied only once per invited user - on their first successful payment."
+    )
+    LEGACY_REFS: bool = Field(
+        default=True,
+        description="Allow legacy referral links like ref_<telegram_id> to continue working. Defaults to True when unset."
     )
 
     PANEL_API_URL: Optional[str] = None
@@ -115,6 +141,10 @@ class Settings(BaseSettings):
         default=None,
         description=
         "Comma-separated UUIDs of internal squads to assign to new panel users")
+    USER_EXTERNAL_SQUAD_UUID: Optional[str] = Field(
+        default=None,
+        description=
+        "UUID of the external squad to assign to new panel users (optional)")
 
     TRIAL_ENABLED: bool = Field(default=True)
     TRIAL_DURATION_DAYS: int = Field(default=3)
@@ -128,6 +158,15 @@ class Settings(BaseSettings):
 
     START_COMMAND_DESCRIPTION: Optional[str] = Field(default=None)
     DISABLE_WELCOME_MESSAGE: bool = Field(default=False, description="Disable welcome message on /start command")
+
+    MY_DEVICES_SECTION_ENABLED: bool = Field(
+        default=False,
+        description="Enable the My Devices section in the subscription menu"
+    )
+    USER_HWID_DEVICE_LIMIT: Optional[int] = Field(
+        default=None,
+        description="Default hardware device limit for panel users (0 = unlimited)"
+    )
     
     # Inline mode thumbnail URLs
     INLINE_REFERRAL_THUMBNAIL_URL: str = Field(default="https://cdn-icons-png.flaticon.com/512/1077/1077114.png")
@@ -190,6 +229,15 @@ class Settings(BaseSettings):
 
     @computed_field
     @property
+    def parsed_user_external_squad_uuid(self) -> Optional[str]:
+        if self.USER_EXTERNAL_SQUAD_UUID:
+            cleaned = self.USER_EXTERNAL_SQUAD_UUID.strip()
+            if cleaned:
+                return cleaned
+        return None
+
+    @computed_field
+    @property
     def yookassa_webhook_path(self) -> str:
 
         return "/webhook/yookassa"
@@ -240,6 +288,32 @@ class Settings(BaseSettings):
         if base:
             return f"{base.rstrip('/')}{self.cryptopay_webhook_path}"
         return None
+
+    @computed_field
+    @property
+    def freekassa_webhook_path(self) -> str:
+        return "/webhook/freekassa"
+
+    @computed_field
+    @property
+    def freekassa_full_webhook_url(self) -> Optional[str]:
+        base = self.WEBHOOK_BASE_URL
+        if base:
+            return f"{base.rstrip('/')}{self.freekassa_webhook_path}"
+        return None
+
+    # Computed YooKassa receipt fields based on recurring toggle
+    @computed_field
+    @property
+    def yk_receipt_payment_mode(self) -> str:
+        # If autopayments are enabled, use service; otherwise full prepayment
+        return "service" if self.YOOKASSA_AUTOPAYMENTS_ENABLED else "full_prepayment"
+
+    @computed_field
+    @property
+    def yk_receipt_payment_subject(self) -> str:
+        # If autopayments are enabled, use full_payment; otherwise payment
+        return "full_payment" if self.YOOKASSA_AUTOPAYMENTS_ENABLED else "payment"
 
     @computed_field
     @property
@@ -323,6 +397,22 @@ class Settings(BaseSettings):
         if isinstance(v, str) and v.strip() == '':
             return None
         return v
+
+    @field_validator('REQUIRED_CHANNEL_LINK', mode='before')
+    @classmethod
+    def sanitize_optional_link(cls, v):
+        if isinstance(v, str) and not v.strip():
+            return None
+        return v
+    
+    @field_validator('USER_HWID_DEVICE_LIMIT', mode='before')
+    @classmethod
+    def validate_optional_int(cls, v):
+        if isinstance(v, str):
+            v = v.strip()
+            if not v:
+                return None
+        return v
     
     # Notification types
     LOG_NEW_USERS: bool = Field(default=True, description="Send notifications for new user registrations")
@@ -359,6 +449,22 @@ def get_settings() -> Settings:
                 logging.warning(
                     "CRITICAL: YooKassa credentials (SHOP_ID or SECRET_KEY) are not set. Payments will not work."
                 )
+            if _settings_instance.FREEKASSA_ENABLED:
+                if (
+                    not _settings_instance.FREEKASSA_MERCHANT_ID
+                    or not _settings_instance.FREEKASSA_API_KEY
+                ):
+                    logging.warning(
+                        "CRITICAL: FreeKassa is enabled but SHOP_ID or API key is missing. FreeKassa payments will not work."
+                    )
+                if not _settings_instance.FREEKASSA_SECOND_SECRET:
+                    logging.warning(
+                        "WARNING: FreeKassa second secret is not set. Incoming payment notifications cannot be verified."
+                    )
+                if not _settings_instance.subscription_options:
+                    logging.warning(
+                        "CRITICAL: FreeKassa is enabled but no subscription prices are configured (RUB_PRICE_*). Users will not see payment buttons."
+                    )
 
         except ValidationError as e:
             logging.critical(

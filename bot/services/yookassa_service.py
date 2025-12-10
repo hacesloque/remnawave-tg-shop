@@ -61,7 +61,11 @@ class YooKassaService:
             description: str,
             metadata: Dict[str, Any],
             receipt_email: Optional[str] = None,
-            receipt_phone: Optional[str] = None) -> Optional[Dict[str, Any]]:
+            receipt_phone: Optional[str] = None,
+            save_payment_method: bool = False,
+            payment_method_id: Optional[str] = None,
+            capture: bool = True,
+            bind_only: bool = False) -> Optional[Dict[str, Any]]:
         if not self.configured:
             logging.error("YooKassa is not configured. Cannot create payment.")
             return None
@@ -102,13 +106,23 @@ class YooKassaService:
                 "value": str(round(amount, 2)),
                 "currency": currency.upper()
             })
-            builder.set_capture(True)
+            # For binding cards only, do not capture and set minimal amount
+            if bind_only:
+                capture = False
+                amount = max(amount, 1.00)
+            builder.set_capture(capture)
             builder.set_confirmation({
                 "type": ConfirmationType.REDIRECT,
                 "return_url": self.return_url
             })
             builder.set_description(description)
             builder.set_metadata(metadata)
+            if save_payment_method:
+                # Ask YooKassa to save method for off-session charges
+                builder.set_save_payment_method(True)
+            if payment_method_id:
+                # Use a previously saved payment method for merchant-initiated payments
+                builder.set_payment_method_id(payment_method_id)
 
             receipt_items_list: List[Dict[str, Any]] = [{
                 "description":
@@ -122,9 +136,9 @@ class YooKassaService:
                 "vat_code":
                 str(self.settings.YOOKASSA_VAT_CODE),
                 "payment_mode":
-                self.settings.YOOKASSA_PAYMENT_MODE,
+                getattr(self.settings, 'yk_receipt_payment_mode', self.settings.YOOKASSA_PAYMENT_MODE),
                 "payment_subject":
-                self.settings.YOOKASSA_PAYMENT_SUBJECT
+                getattr(self.settings, 'yk_receipt_payment_subject', self.settings.YOOKASSA_PAYMENT_SUBJECT)
             }]
 
             receipt_data_dict: Dict[str, Any] = {
@@ -178,7 +192,8 @@ class YooKassaService:
                 "description_from_yk":
                 response.description,
                 "test_mode":
-                response.test if hasattr(response, 'test') else None
+                response.test if hasattr(response, 'test') else None,
+                "payment_method": getattr(response, 'payment_method', None),
             }
         except Exception as e:
             logging.error(f"YooKassa payment creation failed: {e}",
@@ -204,37 +219,40 @@ class YooKassaService:
                 logging.info(
                     f"YooKassa payment info for {payment_id_in_yookassa}: Status={payment_info_yk.status}, Paid={payment_info_yk.paid}"
                 )
+                pm = getattr(payment_info_yk, 'payment_method', None)
+                pm_payload: Dict[str, Any] = {}
+                if pm:
+                    # Collect common fields, including id and hints for last4
+                    pm_id = getattr(pm, 'id', None)
+                    pm_type = getattr(pm, 'type', None)
+                    pm_title = getattr(pm, 'title', None)
+                    account_number = getattr(pm, 'account_number', None) or getattr(pm, 'account', None)
+                    card_obj = getattr(pm, 'card', None)
+                    last4_val = None
+                    if card_obj and hasattr(card_obj, 'last4'):
+                        last4_val = getattr(card_obj, 'last4')
+                    elif isinstance(account_number, str) and len(account_number) >= 4:
+                        last4_val = account_number[-4:]
+                    pm_payload = {
+                        "id": pm_id,
+                        "type": pm_type,
+                        "title": pm_title,
+                        "card_last4": last4_val,
+                    }
                 return {
-                    "id":
-                    payment_info_yk.id,
-                    "status":
-                    payment_info_yk.status,
-                    "paid":
-                    payment_info_yk.paid,
-                    "amount_value":
-                    float(payment_info_yk.amount.value),
-                    "amount_currency":
-                    payment_info_yk.amount.currency,
-                    "metadata":
-                    payment_info_yk.metadata,
-                    "description":
-                    payment_info_yk.description,
-                    "refundable":
-                    payment_info_yk.refundable,
-                    "created_at":
-                    payment_info_yk.created_at.isoformat() if hasattr(
-                        payment_info_yk.created_at, 'isoformat') else str(
-                            payment_info_yk.created_at),
-                    "captured_at":
-                    payment_info_yk.captured_at.isoformat()
-                    if payment_info_yk.captured_at and hasattr(
-                        payment_info_yk.captured_at, 'isoformat') else None,
-                    "payment_method_type":
-                    payment_info_yk.payment_method.type
-                    if payment_info_yk.payment_method else None,
-                    "test_mode":
-                    payment_info_yk.test
-                    if hasattr(payment_info_yk, 'test') else None
+                    "id": payment_info_yk.id,
+                    "status": payment_info_yk.status,
+                    "paid": payment_info_yk.paid,
+                    "amount_value": float(payment_info_yk.amount.value),
+                    "amount_currency": payment_info_yk.amount.currency,
+                    "metadata": payment_info_yk.metadata,
+                    "description": payment_info_yk.description,
+                    "refundable": payment_info_yk.refundable,
+                    "created_at": payment_info_yk.created_at.isoformat() if hasattr(
+                        payment_info_yk.created_at, 'isoformat') else str(payment_info_yk.created_at),
+                    "captured_at": payment_info_yk.captured_at.isoformat() if getattr(payment_info_yk, 'captured_at', None) and hasattr(payment_info_yk.captured_at, 'isoformat') else None,
+                    "payment_method": pm_payload,
+                    "test_mode": getattr(payment_info_yk, 'test', None),
                 }
             else:
                 logging.warning(
@@ -246,3 +264,16 @@ class YooKassaService:
                 f"YooKassa get payment info for {payment_id_in_yookassa} failed: {e}",
                 exc_info=True)
             return None
+
+    async def cancel_payment(self, payment_id_in_yookassa: str) -> bool:
+        if not self.configured:
+            logging.error("YooKassa is not configured. Cannot cancel payment.")
+            return False
+        try:
+            loop = asyncio.get_running_loop()
+            await loop.run_in_executor(None, lambda: YooKassaPayment.cancel(payment_id_in_yookassa))
+            logging.info(f"Cancelled YooKassa payment {payment_id_in_yookassa}")
+            return True
+        except Exception as e:
+            logging.error(f"Failed to cancel YooKassa payment {payment_id_in_yookassa}: {e}")
+            return False

@@ -12,7 +12,7 @@ from sqlalchemy.orm import sessionmaker
 from config.settings import Settings
 from .panel_api_service import PanelApiService
 from bot.middlewares.i18n import JsonI18n
-from bot.keyboards.inline.user_keyboards import get_subscribe_only_markup
+from bot.keyboards.inline.user_keyboards import get_subscribe_only_markup, get_autorenew_cancel_keyboard
 from db.dal import user_dal
 from bot.utils.date_utils import add_months
 
@@ -192,7 +192,51 @@ class PanelWebhookService:
 
         if event_name in EVENT_MAP:
             days_left, msg_key = EVENT_MAP[event_name]
+            if days_left == 1:
+                # Trigger auto-renew via SubscriptionService (wired in at factory)
+                try:
+                    subscription_service = getattr(self, "subscription_service", None)
+                    if subscription_service:
+                        async with self.async_session_factory() as session:
+                            from db.dal import subscription_dal
+                            sub = await subscription_dal.get_active_subscription_by_user_id(session, user_id)
+                            if sub and sub.auto_renew_enabled and sub.provider != 'tribute':
+                                try:
+                                    ok = await subscription_service.charge_subscription_renewal(session, sub)
+                                    # If initiation succeeded, suppress the 24h reminder by returning early
+                                    if ok:
+                                        await session.commit()
+                                        return
+                                    else:
+                                        await session.rollback()
+                                except Exception:
+                                    await session.rollback()
+                                    logging.exception("Auto-renew attempt (24h) failed")
+                except Exception:
+                    logging.exception("Auto-renew trigger (24h) failed pre-check")
             if days_left <= self.settings.SUBSCRIPTION_NOTIFY_DAYS_BEFORE:
+                # For 48h event, if auto-renew is enabled and not tribute, show special notice with cancel button
+                if days_left == 2:
+                    async with self.async_session_factory() as session:
+                        from db.dal import subscription_dal
+                        sub = await subscription_dal.get_active_subscription_by_user_id(session, user_id)
+                        logging.info(
+                            "48h webhook check: user_id=%s sub_found=%s auto_renew=%s provider=%s",
+                            user_id,
+                            bool(sub),
+                            getattr(sub, 'auto_renew_enabled', None) if sub else None,
+                            getattr(sub, 'provider', None) if sub else None,
+                        )
+                        if sub and sub.auto_renew_enabled and sub.provider != 'tribute':
+                            cancel_kb = get_autorenew_cancel_keyboard(lang, self.i18n)
+                            await self._send_message(
+                                user_id,
+                                lang,
+                                "autorenew_48h_charge_tomorrow_notice",
+                                reply_markup=cancel_kb,
+                                user_name=first_name,
+                            )
+                            return
                 await self._send_message(
                     user_id,
                     lang,

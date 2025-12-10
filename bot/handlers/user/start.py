@@ -7,16 +7,23 @@ from aiogram.fsm.context import FSMContext
 from typing import Optional, Union
 from sqlalchemy.ext.asyncio import AsyncSession
 from datetime import datetime, timezone
+from aiogram.exceptions import TelegramAPIError, TelegramBadRequest, TelegramForbiddenError
 
 from db.dal import user_dal
+from db.models import User
 
-from bot.keyboards.inline.user_keyboards import get_main_menu_inline_keyboard, get_language_selection_keyboard
+from bot.keyboards.inline.user_keyboards import (
+    get_main_menu_inline_keyboard,
+    get_language_selection_keyboard,
+    get_channel_subscription_keyboard,
+)
 from bot.services.subscription_service import SubscriptionService
 from bot.services.panel_api_service import PanelApiService
 from bot.services.referral_service import ReferralService
 from bot.services.promo_code_service import PromoCodeService
 from config.settings import Settings
 from bot.middlewares.i18n import JsonI18n
+from bot.utils.text_sanitizer import sanitize_username, sanitize_display_name
 
 router = Router(name="user_start_router")
 
@@ -49,6 +56,7 @@ async def send_main_menu(target_event: Union[types.Message,
             except Exception:
                 pass
         return
+
 
     _ = lambda key, **kwargs: i18n.gettext(current_lang, key, **kwargs)
 
@@ -115,9 +123,188 @@ async def send_main_menu(target_event: Union[types.Message,
                 pass
 
 
+async def ensure_required_channel_subscription(
+        event: Union[types.Message, types.CallbackQuery],
+        settings: Settings,
+        i18n: Optional[JsonI18n],
+        current_lang: str,
+        session: AsyncSession,
+        db_user: Optional[User] = None) -> bool:
+    """
+    Verify that the user is a member of the required channel (if configured).
+    Returns True when access can proceed, False when user must subscribe first.
+    """
+    required_channel_id = settings.REQUIRED_CHANNEL_ID
+    if not required_channel_id:
+        return True
+
+    if isinstance(event, types.CallbackQuery):
+        user_id = event.from_user.id
+        bot_instance: Optional[Bot] = getattr(event, "bot", None)
+        if bot_instance is None and event.message:
+            bot_instance = event.message.bot
+        message_obj: Optional[types.Message] = event.message
+    else:
+        user_id = event.from_user.id
+        bot_instance = event.bot if hasattr(event, "bot") else None
+        message_obj = event
+
+    if bot_instance is None:
+        logging.error(
+            "Channel subscription check: bot instance missing for user %s.", user_id
+        )
+        return False
+
+    if user_id in settings.ADMIN_IDS:
+        return True
+
+    if db_user is None:
+        try:
+            db_user = await user_dal.get_user_by_id(session, user_id)
+        except Exception as fetch_error:
+            logging.error(
+                "Channel subscription check: failed to fetch user %s: %s",
+                user_id,
+                fetch_error,
+                exc_info=True,
+            )
+            return False
+
+    if not db_user:
+        logging.warning(
+            "Required channel check skipped because user %s is not persisted yet.",
+            user_id,
+        )
+        return True
+
+    if (db_user.channel_subscription_verified
+            and db_user.channel_subscription_verified_for
+            == required_channel_id):
+        return True
+
+    def translate(key: str, **kwargs) -> str:
+        if i18n:
+            return i18n.gettext(current_lang, key, **kwargs)
+        return key
+
+    now = datetime.now(timezone.utc)
+    is_member = False
+    status_value = None
+
+    try:
+        member = await bot_instance.get_chat_member(required_channel_id, user_id)
+        status = getattr(member, "status", None)
+        status_value = getattr(status, "value", status)
+        allowed_statuses = {"creator", "administrator", "member", "restricted"}
+        if status_value in allowed_statuses:
+            is_member = True
+    except TelegramBadRequest as bad_request:
+        logging.info(
+            "Required channel check: user %s not subscribed (details: %s)",
+            user_id,
+            bad_request,
+        )
+    except TelegramForbiddenError as forbidden_error:
+        logging.error(
+            "Required channel check failed due to insufficient permissions: %s",
+            forbidden_error,
+        )
+        error_text = translate("channel_subscription_check_failed")
+        if isinstance(event, types.CallbackQuery):
+            try:
+                await event.answer(error_text, show_alert=True)
+            except Exception:
+                pass
+            if message_obj:
+                try:
+                    await message_obj.answer(error_text)
+                except Exception:
+                    pass
+        else:
+            await event.answer(error_text)
+        return False
+    except TelegramAPIError as api_error:
+        logging.error(
+            "Required channel check failed for user %s: %s",
+            user_id,
+            api_error,
+            exc_info=True,
+        )
+        error_text = translate("channel_subscription_check_failed")
+        if isinstance(event, types.CallbackQuery):
+            try:
+                await event.answer(error_text, show_alert=True)
+            except Exception:
+                pass
+            if message_obj:
+                try:
+                    await message_obj.answer(error_text)
+                except Exception:
+                    pass
+        else:
+            await event.answer(error_text)
+        return False
+
+    update_payload = {
+        "channel_subscription_checked_at": now,
+        "channel_subscription_verified_for": required_channel_id,
+        "channel_subscription_verified": is_member,
+    }
+    try:
+        await user_dal.update_user(session, user_id, update_payload)
+    except Exception as update_error:
+        logging.error(
+            "Failed to persist channel verification result for user %s: %s",
+            user_id,
+            update_error,
+            exc_info=True,
+        )
+
+    if is_member:
+        logging.info(
+            "User %s confirmed as member of required channel %s (status=%s).",
+            user_id,
+            required_channel_id,
+            status_value,
+        )
+        return True
+
+    keyboard = (get_channel_subscription_keyboard(
+        current_lang, i18n, settings.REQUIRED_CHANNEL_LINK
+    )
+               if i18n else None)
+
+    prompt_text = translate("channel_subscription_required")
+
+    if isinstance(event, types.CallbackQuery):
+        if keyboard and event.message:
+            try:
+                await event.message.edit_text(prompt_text, reply_markup=keyboard)
+            except Exception as edit_error:
+                logging.debug(
+                    "Failed to edit prompt message for user %s: %s",
+                    user_id,
+                    edit_error,
+                )
+        if keyboard is None and message_obj:
+            try:
+                await message_obj.answer(prompt_text)
+            except Exception:
+                pass
+        try:
+            await event.answer(prompt_text, show_alert=True)
+        except Exception:
+            pass
+    else:
+        await event.answer(prompt_text, reply_markup=keyboard)
+
+    return False
+
+
 @router.message(CommandStart())
-@router.message(CommandStart(magic=F.args.regexp(r"^ref_(\d+)$").as_("ref_match")))
+@router.message(CommandStart(magic=F.args.regexp(r"^ref_((?:[uU][A-Za-z0-9]{9})|(?:[A-Za-z0-9]{9})|\d+)$").as_("ref_match")))
 @router.message(CommandStart(magic=F.args.regexp(r"^promo_(\w+)$").as_("promo_match")))
+@router.message(CommandStart(magic=F.args.regexp(r"^(?!ref_|promo_)([A-Za-z0-9_\-]{2,64})$").as_("ad_param_match")))
 async def start_command_handler(message: types.Message,
                                 state: FSMContext,
                                 settings: Settings,
@@ -125,7 +312,8 @@ async def start_command_handler(message: types.Message,
                                 subscription_service: SubscriptionService,
                                 session: AsyncSession,
                                 ref_match: Optional[re.Match] = None,
-                                promo_match: Optional[re.Match] = None):
+                                promo_match: Optional[re.Match] = None,
+                                ad_param_match: Optional[re.Match] = None):
     await state.clear()
     current_lang = i18n_data.get("current_language", settings.DEFAULT_LANGUAGE)
     i18n: Optional[JsonI18n] = i18n_data.get("i18n_instance")
@@ -137,22 +325,44 @@ async def start_command_handler(message: types.Message,
 
     referred_by_user_id: Optional[int] = None
     promo_code_to_apply: Optional[str] = None
+    ad_start_param: Optional[str] = None
 
     if ref_match:
-        potential_referrer_id = int(ref_match.group(1))
-        if await user_dal.get_user_by_id(session, potential_referrer_id):
-            referred_by_user_id = potential_referrer_id
+        raw_ref_value = ref_match.group(1)
+        if raw_ref_value.isdigit():
+            if settings.LEGACY_REFS:
+                potential_referrer_id = int(raw_ref_value)
+                if potential_referrer_id != user_id and await user_dal.get_user_by_id(
+                        session, potential_referrer_id):
+                    referred_by_user_id = potential_referrer_id
+        else:
+            normalized_code = raw_ref_value.strip()
+            if normalized_code and normalized_code[0].lower() == "u":
+                normalized_code = normalized_code[1:]
+            ref_user = None
+            if normalized_code:
+                ref_user = await user_dal.get_user_by_referral_code(
+                    session, normalized_code)
+            if ref_user and ref_user.user_id != user_id:
+                referred_by_user_id = ref_user.user_id
     elif promo_match:
         promo_code_to_apply = promo_match.group(1)
         logging.info(f"User {user_id} started with promo code: {promo_code_to_apply}")
+    elif ad_param_match:
+        ad_start_param = ad_param_match.group(1)
+        logging.info(f"User {user_id} started with ad start param: {ad_start_param}")
+
+    sanitized_username = sanitize_username(user.username)
+    sanitized_first_name = sanitize_display_name(user.first_name)
+    sanitized_last_name = sanitize_display_name(user.last_name)
 
     db_user = await user_dal.get_user_by_id(session, user_id)
     if not db_user:
         user_data_to_create = {
             "user_id": user_id,
-            "username": user.username,
-            "first_name": user.first_name,
-            "last_name": user.last_name,
+            "username": sanitized_username,
+            "first_name": sanitized_first_name,
+            "last_name": sanitized_last_name,
             "language_code": current_lang,
             "referred_by_id": referred_by_user_id,
             "registration_date": datetime.now(timezone.utc)
@@ -161,6 +371,17 @@ async def start_command_handler(message: types.Message,
             db_user, created = await user_dal.create_user(session, user_data_to_create)
 
             if created:
+                try:
+                    await session.commit()
+                except Exception as commit_error:
+                    await session.rollback()
+                    logging.error(
+                        f"Failed to commit new user {user_id}: {commit_error}",
+                        exc_info=True,
+                    )
+                    await message.answer(_("error_occurred_processing_request"))
+                    return
+
                 logging.info(
                     f"New user {user_id} added to session. Referred by: {referred_by_user_id or 'N/A'}."
                 )
@@ -171,8 +392,8 @@ async def start_command_handler(message: types.Message,
                     notification_service = NotificationService(message.bot, settings, i18n)
                     await notification_service.notify_new_user_registration(
                         user_id=user_id,
-                        username=user.username,
-                        first_name=user.first_name,
+                        username=sanitized_username,
+                        first_name=sanitized_first_name,
                         referred_by_id=referred_by_user_id
                     )
                 except Exception as e:
@@ -197,12 +418,12 @@ async def start_command_handler(message: types.Message,
                 is_active_now = False
             if not is_active_now:
                 update_payload["referred_by_id"] = referred_by_user_id
-        if user.username != db_user.username:
-            update_payload["username"] = user.username
-        if user.first_name != db_user.first_name:
-            update_payload["first_name"] = user.first_name
-        if user.last_name != db_user.last_name:
-            update_payload["last_name"] = user.last_name
+        if sanitized_username != db_user.username:
+            update_payload["username"] = sanitized_username
+        if sanitized_first_name != db_user.first_name:
+            update_payload["first_name"] = sanitized_first_name
+        if sanitized_last_name != db_user.last_name:
+            update_payload["last_name"] = sanitized_last_name
 
         if update_payload:
             try:
@@ -217,61 +438,132 @@ async def start_command_handler(message: types.Message,
                     f"Failed to update existing user {user_id} in session: {e_update}",
                     exc_info=True)
 
+    # Attribute user to ad campaign if start param provided
+    if ad_start_param:
+        try:
+            from db.dal import ad_dal as _ad_dal
+            campaign = await _ad_dal.get_campaign_by_start_param(session, ad_start_param)
+            if campaign and campaign.is_active:
+                await _ad_dal.ensure_attribution(session, user_id=user_id, campaign_id=campaign.ad_campaign_id)
+                await session.commit()
+        except Exception as e_attr:
+            logging.error(f"Failed to attribute user {user_id} to ad '{ad_start_param}': {e_attr}")
+            try:
+                await session.rollback()
+            except Exception:
+                pass
+
+    if not await ensure_required_channel_subscription(message, settings, i18n,
+                                                      current_lang, session,
+                                                      db_user):
+        return
+
     # Send welcome message if not disabled
     if not settings.DISABLE_WELCOME_MESSAGE:
         await message.answer(_(key="welcome", user_name=hd.quote(user.full_name)))
-    
+
     # Auto-apply promo code if provided via start parameter
     if promo_code_to_apply:
         try:
             from bot.services.promo_code_service import PromoCodeService
             promo_code_service = PromoCodeService(settings, subscription_service, message.bot, i18n)
-            
+
             success, result = await promo_code_service.apply_promo_code(
                 session, user_id, promo_code_to_apply, current_lang
             )
-            
+
             if success:
                 await session.commit()
                 logging.info(f"Auto-applied promo code '{promo_code_to_apply}' for user {user_id}")
-                
+
                 # Get updated subscription details
                 active = await subscription_service.get_active_subscription_details(session, user_id)
                 config_link = active.get("config_link") if active else None
                 config_link = config_link or _("config_link_not_available")
-                
+
                 new_end_date = result if isinstance(result, datetime) else None
-                
+
                 promo_success_text = _(
                     "promo_code_applied_success_full",
                     end_date=(new_end_date.strftime("%d.%m.%Y %H:%M:%S") if new_end_date else "N/A"),
                     config_link=config_link,
                 )
-                
+
                 from bot.keyboards.inline.user_keyboards import get_connect_and_main_keyboard
                 await message.answer(
                     promo_success_text,
                     reply_markup=get_connect_and_main_keyboard(current_lang, i18n, settings, config_link),
                     parse_mode="HTML"
                 )
-                
+
                 # Don't show main menu if promo was successfully applied
                 return
             else:
                 await session.rollback()
                 logging.warning(f"Failed to auto-apply promo code '{promo_code_to_apply}' for user {user_id}: {result}")
                 # Continue to show main menu if promo failed
-                
+
         except Exception as e:
             logging.error(f"Error auto-applying promo code '{promo_code_to_apply}' for user {user_id}: {e}")
             await session.rollback()
-    
+
     await send_main_menu(message,
                          settings,
                          i18n_data,
                          subscription_service,
                          session,
                          is_edit=False)
+
+
+@router.callback_query(F.data == "channel_subscription:verify")
+async def verify_channel_subscription_callback(
+        callback: types.CallbackQuery,
+        settings: Settings,
+        i18n_data: dict,
+        subscription_service: SubscriptionService,
+        session: AsyncSession):
+    current_lang = i18n_data.get("current_language", settings.DEFAULT_LANGUAGE)
+    i18n: Optional[JsonI18n] = i18n_data.get("i18n_instance")
+
+    db_user = await user_dal.get_user_by_id(session, callback.from_user.id)
+
+    verified = await ensure_required_channel_subscription(
+        callback, settings, i18n, current_lang, session, db_user)
+    if not verified:
+        return
+
+    if db_user and db_user.language_code:
+        current_lang = db_user.language_code
+        i18n_data["current_language"] = current_lang
+
+    if i18n:
+        _ = lambda key, **kwargs: i18n.gettext(current_lang, key, **kwargs)
+    else:
+        _ = lambda key, **kwargs: key
+
+    if not settings.DISABLE_WELCOME_MESSAGE:
+        welcome_text = _(key="welcome",
+                         user_name=hd.quote(callback.from_user.full_name))
+        if callback.message:
+            await callback.message.answer(welcome_text)
+        else:
+            fallback_bot: Optional[Bot] = getattr(callback, "bot", None)
+            if fallback_bot:
+                await fallback_bot.send_message(callback.from_user.id,
+                                                welcome_text)
+
+    try:
+        await callback.answer(_(key="channel_subscription_verified_success"),
+                              show_alert=True)
+    except Exception:
+        pass
+
+    await send_main_menu(callback,
+                         settings,
+                         i18n_data,
+                         subscription_service,
+                         session,
+                         is_edit=bool(callback.message))
 
 
 @router.message(Command("language"))
@@ -378,8 +670,11 @@ async def main_action_callback_handler(
         await user_subscription_handlers.display_subscription_options(
             callback, i18n_data, settings, session)
     elif action == "my_subscription":
-
         await user_subscription_handlers.my_subscription_command_handler(
+            callback, i18n_data, settings, panel_service, subscription_service,
+            session, bot)
+    elif action == "my_devices":
+        await user_subscription_handlers.my_devices_command_handler(
             callback, i18n_data, settings, panel_service, subscription_service,
             session, bot)
     elif action == "referral":
@@ -401,6 +696,13 @@ async def main_action_callback_handler(
                              subscription_service,
                              session,
                              is_edit=True)
+    elif action == "back_to_main_keep":
+        await send_main_menu(callback,
+                             settings,
+                             i18n_data,
+                             subscription_service,
+                             session,
+                             is_edit=False)
     else:
         i18n: Optional[JsonI18n] = i18n_data.get("i18n_instance")
         _ = lambda key, **kwargs: i18n.gettext(

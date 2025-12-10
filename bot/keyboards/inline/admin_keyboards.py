@@ -25,6 +25,10 @@ def get_admin_panel_keyboard(i18n_instance, lang: str,
     builder.button(text=_(key="admin_promo_marketing_section"),
                    callback_data="admin_section:promo_marketing")
     
+    # Реклама
+    builder.button(text=_(key="admin_ads_section", default="📈 Реклама"),
+                   callback_data="admin_action:ads")
+
     # Системные функции
     builder.button(text=_(key="admin_system_functions_section"),
                    callback_data="admin_section:system_functions")
@@ -55,13 +59,15 @@ def get_user_management_keyboard(i18n_instance, lang: str) -> InlineKeyboardMark
     builder = InlineKeyboardBuilder()
     
     builder.button(text=_(key="admin_users_management_button"),
-                   callback_data="admin_action:users_management")
+                   callback_data="admin_action:users_list:0")
+    builder.button(text=_(key="admin_users_search_button"),
+                   callback_data="admin_action:users_search_prompt")
     builder.button(text=_(key="admin_ban_management_section"),
                    callback_data="admin_section:ban_management")
     
     builder.button(text=_(key="back_to_admin_panel_button"),
                    callback_data="admin_action:main")
-    builder.adjust(2, 1)
+    builder.adjust(2, 1, 1)
     return builder.as_markup()
 
 
@@ -113,6 +119,82 @@ def get_system_functions_keyboard(i18n_instance, lang: str) -> InlineKeyboardMar
     builder.button(text=_(key="back_to_admin_panel_button"),
                    callback_data="admin_action:main")
     builder.adjust(2, 1, 1)
+    return builder.as_markup()
+
+
+def get_ads_menu_keyboard(i18n_instance, lang: str) -> InlineKeyboardMarkup:
+    _ = lambda key, **kwargs: i18n_instance.gettext(lang, key, **kwargs)
+    builder = InlineKeyboardBuilder()
+    builder.button(text=_(key="admin_ads_create_button", default="➕ Создать кампанию"),
+                   callback_data="admin_action:ads_create")
+    builder.button(text=_(key="back_to_admin_panel_button"),
+                   callback_data="admin_action:main")
+    builder.adjust(1, 1)
+    return builder.as_markup()
+
+
+def get_ads_list_keyboard(
+    i18n_instance,
+    lang: str,
+    campaigns: list,
+    current_page: int,
+    total_pages: int,
+) -> InlineKeyboardMarkup:
+    _ = lambda key, **kwargs: i18n_instance.gettext(lang, key, **kwargs)
+    builder = InlineKeyboardBuilder()
+
+    for c in campaigns:
+        title = f"{c.source}"
+        builder.button(
+            text=title,
+            callback_data=f"admin_ads:card:{c.ad_campaign_id}:{current_page}",
+        )
+
+    # Pagination row (only when needed)
+    if total_pages > 1:
+        row = []
+        if current_page > 0:
+            row.append(
+                InlineKeyboardButton(
+                    text="⬅️ " + _("prev_page_button", default="Prev"),
+                    callback_data=f"admin_ads:page:{current_page - 1}",
+                )
+            )
+        row.append(
+            InlineKeyboardButton(
+                text=f"{current_page + 1}/{total_pages}",
+                callback_data="ads_page_display",
+            )
+        )
+        if current_page < total_pages - 1:
+            row.append(
+                InlineKeyboardButton(
+                    text=_("next_page_button", default="Next") + " ➡️",
+                    callback_data=f"admin_ads:page:{current_page + 1}",
+                )
+            )
+        if row:
+            builder.row(*row)
+
+    builder.button(text=_(key="admin_ads_create_button", default="➕ Создать кампанию"),
+                   callback_data="admin_action:ads_create")
+    builder.button(text=_(key="back_to_admin_panel_button"),
+                   callback_data="admin_action:main")
+    builder.adjust(1)
+    return builder.as_markup()
+
+
+def get_ad_card_keyboard(i18n_instance, lang: str, campaign_id: int, back_page: int) -> InlineKeyboardMarkup:
+    _ = lambda key, **kwargs: i18n_instance.gettext(lang, key, **kwargs)
+    builder = InlineKeyboardBuilder()
+    # Dangerous action: Delete campaign
+    builder.button(text=_(key="admin_ads_delete_button", default="🗑 Удалить кампанию"),
+                   callback_data=f"admin_ads:delete:{campaign_id}:{back_page}")
+    builder.button(text=_(key="back_to_ads_list_button", default="⬅️ К списку"),
+                   callback_data=f"admin_ads:page:{back_page}")
+    builder.button(text=_(key="back_to_admin_panel_button"),
+                   callback_data="admin_action:main")
+    builder.adjust(1)
     return builder.as_markup()
 
 
@@ -225,6 +307,68 @@ def get_banned_users_keyboard(banned_users: List[User], current_page: int,
     return builder.as_markup()
 
 
+def get_users_list_keyboard(users: List[User], current_page: int,
+                            total_users: int, i18n_instance, lang: str,
+                            page_size: int = 15) -> InlineKeyboardMarkup:
+    """Generate keyboard for paginated user list"""
+    _ = lambda key, **kwargs: i18n_instance.gettext(lang, key, **kwargs)
+    builder = InlineKeyboardBuilder()
+    
+    # Add user buttons
+    for user in users:
+        user_display_parts = []
+        if user.username:
+            user_display_parts.append(f"@{user.username}")
+        user_display_parts.append(f"ID: {user.user_id}")
+        if user.first_name:
+            user_display_parts.append(f"- {user.first_name}")
+        
+        button_text = " ".join(user_display_parts)
+        builder.row(
+            InlineKeyboardButton(
+                text=button_text,
+                callback_data=f"admin_user_card_from_list:{user.user_id}:{current_page}"
+            )
+        )
+    
+    # Pagination buttons
+    if total_users > page_size:
+        total_pages = math.ceil(total_users / page_size)
+        pagination_buttons = []
+        if current_page > 0:
+            pagination_buttons.append(
+                InlineKeyboardButton(
+                    text=_("prev_page_button"),
+                    callback_data=f"admin_action:users_list:{current_page - 1}"
+                )
+            )
+        pagination_buttons.append(
+            InlineKeyboardButton(
+                text=f"{current_page + 1}/{total_pages}",
+                callback_data="stub_page_display"
+            )
+        )
+        if current_page < total_pages - 1:
+            pagination_buttons.append(
+                InlineKeyboardButton(
+                    text=_("next_page_button"),
+                    callback_data=f"admin_action:users_list:{current_page + 1}"
+                )
+            )
+        if pagination_buttons:
+            builder.row(*pagination_buttons)
+    
+    # Back button
+    builder.row(
+        InlineKeyboardButton(
+            text=_("back_to_user_management_button"),
+            callback_data="admin_section:user_management"
+        )
+    )
+    
+    return builder.as_markup()
+
+
 def get_user_card_keyboard(user_id: int,
                            is_banned: bool,
                            i18n_instance,
@@ -240,6 +384,13 @@ def get_user_card_keyboard(user_id: int,
         builder.button(
             text=_(key="user_card_ban_button"),
             callback_data=f"admin_ban_confirm:{user_id}:{banned_list_page}")
+    builder.button(
+        text=_(
+            key="user_card_open_profile_button",
+            default="👤 Open profile"
+        ),
+        url=f"tg://user?id={user_id}"
+    )
     builder.button(
         text=_(key="user_card_back_to_banned_list_button"),
         callback_data=f"admin_action:view_banned:{banned_list_page}")

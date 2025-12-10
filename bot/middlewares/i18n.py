@@ -45,10 +45,27 @@ class JsonI18n:
                         exc_info=True)
 
     def gettext(self, lang_code: Optional[str], key: str, **kwargs) -> str:
-        effective_lang_code = lang_code if lang_code and lang_code in self.locales_data else self.default_lang
+        # Determine effective language with robust fallback
+        if lang_code and lang_code in self.locales_data:
+            effective_lang_code = lang_code
+        elif self.default_lang in self.locales_data:
+            effective_lang_code = self.default_lang
+        elif 'en' in self.locales_data:
+            effective_lang_code = 'en'
+        else:
+            effective_lang_code = lang_code or self.default_lang
 
         lang_data = self.locales_data.get(effective_lang_code)
         if lang_data is None:
+            # Try explicit fallback to English if available
+            fallback_data = self.locales_data.get('en')
+            if fallback_data is not None:
+                text = fallback_data.get(key)
+                if text is not None:
+                    try:
+                        return text.format(**kwargs) if kwargs else text
+                    except Exception:
+                        return text
             logging.warning(
                 f"No language data for '{effective_lang_code}' (default '{self.default_lang}' also missing). Key '{key}' will be returned as is."
             )

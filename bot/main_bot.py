@@ -202,6 +202,7 @@ async def on_shutdown_configured(dispatcher: Dispatcher):
     for service_key in (
         "panel_service",
         "cryptopay_service",
+        "freekassa_service",
         "tribute_service",
         "panel_webhook_service",
         "yookassa_service",
@@ -305,6 +306,8 @@ async def run_bot(settings_param: Settings):
         await build_and_start_web_app(dp, bot, settings_param, local_async_session_factory)
 
     main_tasks.append(asyncio.create_task(web_server_task(), name="AIOHTTPServerTask"))
+
+    # Recurring billing moved to panel webhook (24h before expiry). No periodic task needed here.
 
     logging.info("Starting bot in Webhook mode with AIOHTTP server...")
     logging.info(f"Starting bot with main tasks: {[task.get_name() for task in main_tasks]}")

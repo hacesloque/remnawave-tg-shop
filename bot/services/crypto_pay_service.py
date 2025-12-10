@@ -16,6 +16,7 @@ from bot.services.referral_service import ReferralService
 from bot.keyboards.inline.user_keyboards import get_connect_and_main_keyboard
 from bot.services.notification_service import NotificationService
 from db.dal import payment_dal, user_dal
+from bot.utils.text_sanitizer import sanitize_display_name, username_for_display
 
 
 class CryptoPayService:
@@ -67,18 +68,28 @@ class CryptoPayService:
             logging.error("CryptoPayService not configured")
             return None
 
-        payment_record = await payment_dal.create_payment_record(
-            session,
-            {
-                "user_id": user_id,
-                "amount": float(amount),
-                "currency": self.settings.CRYPTOPAY_ASSET,
-                "status": "pending_cryptopay",
-                "description": description,
-                "subscription_duration_months": months,
-                "provider": "cryptopay",
-            },
-        )
+        # Create pending payment in DB and commit to persist
+        try:
+            payment_record = await payment_dal.create_payment_record(
+                session,
+                {
+                    "user_id": user_id,
+                    "amount": float(amount),
+                    "currency": self.settings.CRYPTOPAY_ASSET,
+                    "status": "pending_cryptopay",
+                    "description": description,
+                    "subscription_duration_months": months,
+                    "provider": "cryptopay",
+                },
+            )
+            await session.commit()
+        except Exception as e_db_create:
+            await session.rollback()
+            logging.error(
+                f"Failed to create cryptopay payment record for user {user_id}: {e_db_create}",
+                exc_info=True,
+            )
+            return None
         payload = json.dumps({
             "user_id": str(user_id),
             "subscription_months": str(months),
@@ -93,12 +104,21 @@ class CryptoPayService:
                 description=description,
                 payload=payload,
             )
-            await payment_dal.update_provider_payment_and_status(
-                session,
-                payment_record.payment_id,
-                str(invoice.invoice_id),
-                str(invoice.status),
-            )
+            try:
+                await payment_dal.update_provider_payment_and_status(
+                    session,
+                    payment_record.payment_id,
+                    str(invoice.invoice_id),
+                    str(invoice.status),
+                )
+                await session.commit()
+            except Exception as e_db_update:
+                await session.rollback()
+                logging.error(
+                    f"Failed to update cryptopay payment record {payment_record.payment_id}: {e_db_update}",
+                    exc_info=True,
+                )
+                return None
             return invoice.bot_invoice_url
         except Exception as e:
             logging.error(f"CryptoPay invoice creation failed: {e}", exc_info=True)
@@ -155,6 +175,7 @@ class CryptoPayService:
                 return
 
             db_user = await user_dal.get_user_by_id(session, user_id)
+            # Use DB language for user-facing messages
             lang = db_user.language_code if db_user and db_user.language_code else settings.DEFAULT_LANGUAGE
             _ = lambda k, **kw: i18n.gettext(lang, k, **kw)
 
@@ -169,10 +190,12 @@ class CryptoPayService:
                 inviter_name_display = _("friend_placeholder")
                 if db_user and db_user.referred_by_id:
                     inviter = await user_dal.get_user_by_id(session, db_user.referred_by_id)
-                    if inviter and inviter.first_name:
-                        inviter_name_display = inviter.first_name
-                    elif inviter and inviter.username:
-                        inviter_name_display = f"@{inviter.username}"
+                    if inviter:
+                        safe_name = sanitize_display_name(inviter.first_name) if inviter.first_name else None
+                        if safe_name:
+                            inviter_name_display = safe_name
+                        elif inviter.username:
+                            inviter_name_display = username_for_display(inviter.username, with_at=False)
                 text = _("payment_successful_with_referral_bonus_full",
                          months=months,
                          base_end_date=activation["end_date"].strftime('%Y-%m-%d'),
@@ -186,7 +209,9 @@ class CryptoPayService:
                          end_date=final_end.strftime('%Y-%m-%d'),
                          config_link=config_link)
 
-            markup = get_connect_and_main_keyboard(lang, i18n, settings, config_link)
+            markup = get_connect_and_main_keyboard(
+                lang, i18n, settings, config_link, preserve_message=True
+            )
             try:
                 await bot.send_message(
                     user_id,

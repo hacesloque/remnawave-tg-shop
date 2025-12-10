@@ -1,31 +1,19 @@
-# Python
-__pycache__/
-*.pyc
-*.pyo
-*.pyd
-.venv/
-.env.local
-.env.*.local
+# Игнорировать базу данных
+bot_database.sqlite3
 
-# Docker
-*.log
-docker-data/
-remnawave-tg-shop-db-data/
-remnawave-db-data/
-remnawave-redis-data/
-
-# OS
-.DS_Store
-Thumbs.db
+# Игнорировать файлы окружения
 .env
 
-# Local overrides (не коммитим локальные переменные/настройки)
-docker-compose.override.yml
+# Игнорировать кэш Python
+__pycache__/
 
-# Backups / temp files (автоматические .bak и пр.)
-*.bak
-*.bak_*
-*.bak.*
-*.new
-*.tmp
-*~
+# Игнорировать настройки IDE (если используешь, например, PyCharm или VSCode)
+.idea/
+.vscode/
+
+# Игнорировать Docker артефакты (если вдруг)
+*.log
+*.pid
+locales/ru_backup.json
+locales/en_backup.json
+db/models_old.py

@@ -14,13 +14,15 @@ async def get_active_subscription_by_user_id(
         user_id: int,
         panel_user_uuid: Optional[str] = None) -> Optional[Subscription]:
     stmt = select(Subscription).where(
-        Subscription.user_id == user_id, Subscription.is_active == True,
-        Subscription.end_date > datetime.now(timezone.utc))
+        Subscription.user_id == user_id,
+        Subscription.is_active == True,
+        Subscription.end_date > datetime.now(timezone.utc),
+    )
     if panel_user_uuid:
         stmt = stmt.where(Subscription.panel_user_uuid == panel_user_uuid)
-    stmt = stmt.order_by(Subscription.end_date.desc())
+    stmt = stmt.order_by(Subscription.end_date.desc()).limit(1)
     result = await session.execute(stmt)
-    return result.scalar_one_or_none()
+    return result.scalars().first()
 
 
 async def get_subscription_by_panel_subscription_uuid(
@@ -51,6 +53,11 @@ async def update_subscription(
         await session.flush()
         await session.refresh(sub)
     return sub
+
+
+async def set_auto_renew(session: AsyncSession, subscription_id: int, enabled: bool) -> Optional[Subscription]:
+    """Toggle auto_renew_enabled for a subscription."""
+    return await update_subscription(session, subscription_id, {"auto_renew_enabled": enabled})
 
 
 async def set_user_subscriptions_cancelled_with_grace(
