@@ -39,9 +39,27 @@ class ReferralService:
         try:
             referee_user_model = await user_dal.get_user_by_id(
                 session, referee_user_id)
-            if not referee_user_model or referee_user_model.referred_by_id is None:
+            if not referee_user_model:
                 logging.debug(
                     f"User {referee_user_id} not referred or inviter ID missing. No referral bonuses."
+                )
+                return {
+                    "referee_bonus_applied_days": None,
+                    "referee_new_end_date": None
+                }
+
+            if referee_user_model.referred_by_id is None:
+                logging.debug(
+                    f"User {referee_user_id} not referred or inviter ID missing. No referral bonuses."
+                )
+                return {
+                    "referee_bonus_applied_days": None,
+                    "referee_new_end_date": None
+                }
+
+            if referee_user_model.referred_by_id == referee_user_id:
+                logging.info(
+                    f"Self-referral detected for user {referee_user_id}. Skipping referral bonuses."
                 )
                 return {
                     "referee_bonus_applied_days": None,
