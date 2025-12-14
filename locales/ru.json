@@ -56,7 +56,7 @@
   "my_devices_feature_disabled": "Раздел \"Мои устройства\" сейчас недоступен.",
 
   "cancel_button": "❌ Отмена",
-  "payment_description_subscription": "Оплата подписки на {months} мес.",
+  "payment_description_subscription": "Оплата услуг технической поддержки ({months} мес.)",
   "payment_link_message": "Для оплаты подписки на {months} мес., нажмите кнопку ниже:",
   "free_kassa_order_info": "Заказ №{order_id} от {date}",
   "payment_invoice_sent_message": "Счёт Telegram Stars отправлен выше. Нажмите «Оплатить» или вернитесь к выбору способа ниже.",

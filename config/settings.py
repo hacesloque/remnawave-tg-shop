@@ -312,8 +312,9 @@ class Settings(BaseSettings):
     @computed_field
     @property
     def yk_receipt_payment_subject(self) -> str:
-        # If autopayments are enabled, use full_payment; otherwise payment
-        return "full_payment" if self.YOOKASSA_AUTOPAYMENTS_ENABLED else "payment"
+        # Receipt subject: for services (support/subscription as a service)
+        # Use service in both cases; this is the safest option for receipts.
+        return "service"
 
     @computed_field
     @property
