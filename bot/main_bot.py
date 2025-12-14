@@ -39,12 +39,9 @@ from bot.services.crypto_pay_service import CryptoPayService, cryptopay_webhook_
 from bot.handlers.user import payment as user_payment_webhook_module
 from bot.handlers.admin.sync_admin import perform_sync
 from bot.utils.message_queue import init_queue_manager
-from bot.handlers.user import devices as devices_handler
 
 
 async def register_all_routers(dp: Dispatcher, settings: Settings):
-    if getattr(settings, 'DEVICES_MANAGEMENT_ENABLED', False):
-        dp.include_router(devices_handler.router)
     dp.include_router(build_root_router(settings))
     logging.info("All application routers registered.")
 

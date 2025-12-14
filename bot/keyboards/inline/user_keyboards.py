@@ -46,11 +46,11 @@ def get_main_menu_inline_keyboard(
             )
         )
 
-    # 📱 Управление устройствами — сразу под "Моя подписка"
+    # 📚 FAQ — сразу под "Моя подписка"
     builder.row(
         InlineKeyboardButton(
-            text="📱 Управление устройствами",
-            callback_data="devices_open",
+            text="📚 FAQ",
+            url="https://static.netaway.top/faq/index.html",
         )
     )
 
