@@ -46,14 +46,6 @@ def get_main_menu_inline_keyboard(
             )
         )
 
-    # 📚 FAQ — сразу под "Моя подписка"
-    builder.row(
-        InlineKeyboardButton(
-            text="📚 FAQ",
-            url="https://static.netaway.top/faq/index.html",
-        )
-    )
-
     # 🎁 Рефералы | 🎟 Промокод
     referral_button = InlineKeyboardButton(
         text=_(key="menu_referral_inline"),
@@ -64,6 +56,14 @@ def get_main_menu_inline_keyboard(
         callback_data="main_action:apply_promo",
     )
     builder.row(referral_button, promo_button)
+
+    # 📚 FAQ — строкой ниже
+    builder.row(
+        InlineKeyboardButton(
+            text="📚 FAQ",
+            url="https://static.netaway.top/faq/index.html",
+        )
+    )
 
     # 🔔 Наш канал: новости и промокоды
     if getattr(settings, "CHANNEL_LINK", None):

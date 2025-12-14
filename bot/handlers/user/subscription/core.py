@@ -356,7 +356,14 @@ async def my_devices_command_handler(
     devices_kb = []
     for index, device in enumerate(devices.get('devices') or [], start=1):
         hwid = device.get('hwid')
-        device_button_text = get_text("disconnect_device_button", hwid=hwid, index=index)
+        device_model = (
+            device.get('deviceModel')
+            or device.get('device_model')
+            or device.get('deviceName')
+            or device.get('device_name')
+        )
+        device_name = device_model or get_text("device_unknown_label")
+        device_button_text = get_text("disconnect_device_button", device_name=device_name, index=index)
 
         devices_kb.append([InlineKeyboardButton(text=device_button_text, callback_data=f"disconnect_device:{hwid}")])
     kb = devices_kb + kb
