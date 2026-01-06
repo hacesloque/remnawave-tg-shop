@@ -1,0 +1,4 @@
+services:
+  remnawave-tg-shop:
+    volumes:
+      - ./bot/keyboards/inline/user_keyboards.py:/app/bot/keyboards/inline/user_keyboards.py:ro
