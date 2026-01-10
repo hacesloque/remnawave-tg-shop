@@ -425,7 +425,8 @@ async def my_devices_command_handler(
         hwid = device.get('hwid')
         if not hwid:
             continue
-        device_button_text = get_text("disconnect_device_button", hwid=_shorten_hwid_for_display(hwid), index=index)
+        device_name = device.get("deviceModel") or _shorten_hwid_for_display(hwid)
+        device_button_text = get_text("disconnect_device_button", device_name=device_name)
         hwid_token = _hwid_callback_token(hwid)
 
         devices_kb.append([InlineKeyboardButton(text=device_button_text, callback_data=f"disconnect_device:{hwid_token}")])
