@@ -47,7 +47,6 @@
   "pay_with_stars_button": "🌟 Telegram Stars",
   "connect_button": "🔗 Connect",
   "cancel_button": "❌ Cancel",
-
   "devices_button": "📱 My Devices ({current_devices}/{max_devices})",
   "my_devices_details": "📱 <b>My Devices ({current_devices}/{max_devices})</b>\n\n{devices}\n\nYou can disconnect a device by selecting it from the list below.\n<blockquote><i>Note: If you disconnect a device, it will be automatically connected again when you use it next. Before deleting, make sure you have deleted the subscription from the application.</i></blockquote>",
   "no_devices_details_found_message": "📱 <b>My Devices</b>\n\nYou don't have any devices yet.\nYou have {max_devices} devices available. You can connect them by clicking the \"🔗 Connect\" button in the subscription menu.",
@@ -57,7 +56,6 @@
   "no_devices_found": "Error loading device list.",
   "devices_unlimited_label": "Unlimited",
   "my_devices_feature_disabled": "The My Devices section is currently unavailable.",
-
   "payment_description_subscription": "Subscription payment for {months} mo.",
   "payment_description_traffic": "Traffic package {traffic_gb} GB",
   "payment_link_message": "To pay for {months} mo. subscription, click the button below:",
@@ -486,5 +484,6 @@
   "admin_ads_delete_confirm": "Are you sure you want to delete campaign #{id}? This action is irreversible.",
   "admin_ads_deleted_success": "Campaign deleted.",
   "admin_ads_not_found": "Campaign not found.",
-  "free_kassa_order_full": "Order #{order_id} from {date}\n\n"
+  "free_kassa_order_full": "Order #{order_id} from {date}\n\n",
+  "promo_code_applied_success_short": "✅ Promo code applied successfully!\nSubscription active until {end_date}."
 }
