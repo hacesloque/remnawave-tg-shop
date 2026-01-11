@@ -6,9 +6,12 @@ from typing import Optional
 from aiogram import Router, F, types, Bot
 from aiogram.filters import StateFilter
 from aiogram.fsm.context import FSMContext
+from aiogram.fsm.storage.base import StorageKey
 from aiogram.utils.markdown import hcode
+from aiogram.utils.keyboard import InlineKeyboardBuilder
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from db.dal import promo_code_dal
 from config.settings import Settings
 from bot.middlewares.i18n import JsonI18n
 from bot.services.promo_code_service import PromoCodeService
@@ -149,17 +152,15 @@ async def process_promo_code_input(
 
     await state.clear()
     logging.info(f"Promo code input '{code_input}' finished for user {user.id}. State cleared.")
-
-
 # Пользователь вводит промокод прямо в чат (вне меню/состояния)
 @router.message(
     StateFilter(None),
     F.text,
     ~F.text.startswith("/"),
-    F.text.regexp(r"^[A-Za-z0-9_\-]{3,30}$"),
 )
-async def maybe_process_promo_code_from_chat(
+async def maybe_process_promo_or_support_from_chat(
     message: types.Message,
+    state: FSMContext,
     settings: Settings,
     i18n_data: dict,
     promo_code_service: PromoCodeService,
@@ -167,43 +168,91 @@ async def maybe_process_promo_code_from_chat(
     bot: Bot,
     session: AsyncSession,
 ):
+    """
+    Chat input routing:
+    - ignore /commands
+    - if looks like promo (3-30 chars [A-Za-z0-9_-]):
+        - if promo DOES NOT exist in DB -> treat as support message
+        - if exists -> apply promo and respond with promo texts
+    - otherwise -> support message
+    """
     if not message.text:
         return
 
     text = message.text.strip()
-
-    # команды не трогаем
-    if text.startswith("/"):
+    if not text:
         return
 
-    if not PROMO_CODE_CHAT_REGEX.match(text):
+    # commands already excluded by decorator, but keep safe
+    if text.startswith("/"):
         return
 
     current_lang = i18n_data.get("current_language", settings.DEFAULT_LANGUAGE)
     i18n: Optional[JsonI18n] = i18n_data.get("i18n_instance")
-    if not i18n or not promo_code_service:
-        await message.reply("Service error. Please try again later.")
+    if not i18n:
+        await message.reply("Language service error.")
         return
-
     _ = lambda key, **kwargs: i18n.gettext(current_lang, key, **kwargs)
 
-    success, result = await promo_code_service.apply_promo_code(
-        session, message.from_user.id, text, current_lang
+    # promo-like?
+    promo_like = bool(re.fullmatch(r"[A-Za-z0-9_\-]{3,30}", text))
+
+    if promo_like:
+        promo = await promo_code_dal.get_promo_code_by_code(session, text)
+        if promo:
+            # promo exists -> apply
+            success, result = await promo_code_service.apply_promo_code(
+                session, message.from_user.id, text, current_lang
+            )
+            if success:
+                await session.commit()
+                new_end_date = result if isinstance(result, datetime) else None
+                response_text = _(
+                    "promo_code_applied_success_short",
+                    end_date=(new_end_date.strftime("%d.%m.%Y %H:%M:%S") if new_end_date else "N/A"),
+                )
+                await message.answer(response_text, parse_mode="HTML")
+                return
+
+            await session.rollback()
+            # result already localized promo text (already used / expired / limit / etc.)
+            await message.answer(result, parse_mode="HTML")
+            return
+
+        # promo-like but NOT existing -> treat as support message (do not show "not found")
+        # fallthrough to support
+
+    # SUPPORT FLOW (any other text)
+    support_admin_id = 7816794857
+    user = message.from_user
+    user_display = f"@{user.username}" if user.username else (user.full_name if user else "Unknown")
+
+    # to admin
+    
+    # SUPPORT: admin reply button
+    kb = InlineKeyboardBuilder()
+    kb.button(text="✉️ Ответить", callback_data=f"support_reply:{message.from_user.id}")
+    kb.button(text="👤 Карточка", callback_data=f"support_user_card:{message.from_user.id}")
+    kb.adjust(2)
+    await bot.send_message(
+    support_admin_id,
+    f"💬 <b>Сообщение в поддержку</b>\n\n"
+    f"👤 Пользователь: {user_display}\n"
+    f"🆔 ID: <code>{user.id}</code>\n\n"
+    f"📝 Сообщение:\n<pre>{text}</pre>",
+
+        reply_markup=kb.as_markup(),
+        parse_mode="HTML",
     )
 
-    if success:
-        await session.commit()
-        new_end_date = result if isinstance(result, datetime) else None
-        response_text = _(
-            "promo_code_applied_success_short",
-            end_date=(new_end_date.strftime("%d.%m.%Y %H:%M:%S") if new_end_date else "N/A"),
-        )
-        await message.answer(response_text, parse_mode="HTML")
-        return
-
-    await session.rollback()
-    await message.answer(result, parse_mode="HTML")
-
+    # to user
+    ack_msg = await message.answer("✅ Сообщение отправлено в поддержку. Мы скоро ответим.", parse_mode="HTML")
+    # store ack message_id so we can delete it after admin reply
+    try:
+        key = StorageKey(bot_id=bot.id, chat_id=user.id, user_id=user.id)
+        await state.storage.set_data(key, {"support_last_ack_message_id": ack_msg.message_id})
+    except Exception as e:
+        logging.warning(f"Failed to store support ack message_id: {e}")
 
 @router.callback_query(F.data == "main_action:back_to_main", UserPromoStates.waiting_for_promo_code)
 async def cancel_promo_input_via_button(

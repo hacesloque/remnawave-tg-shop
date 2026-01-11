@@ -1,8 +1,11 @@
+from aiogram import F, types, Bot
 import logging
 import re
 from aiogram import Router, F, types, Bot
+from aiogram.fsm.state import StatesGroup, State
 from aiogram.exceptions import TelegramBadRequest
 from aiogram.fsm.context import FSMContext
+from aiogram.fsm.storage.base import StorageKey
 from aiogram.utils.markdown import hcode, hbold
 from typing import Optional, Dict, Any, Callable, Awaitable
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -1327,3 +1330,144 @@ async def user_card_from_list_handler(callback: types.CallbackQuery,
     except Exception as e:
         logging.error(f"Error displaying user card: {e}")
         await callback.answer("Error displaying user card", show_alert=True)
+
+
+
+
+@router.callback_query(F.data.startswith("support_user_card:"))
+async def support_user_card_handler(
+    callback: types.CallbackQuery,
+    state: FSMContext,
+    i18n_data: dict,
+    settings: Settings,
+    bot: Bot,
+    subscription_service: SubscriptionService,
+    session: AsyncSession,
+):
+    """
+    Support: open user card as a NEW message (do not edit/replace the support request message).
+    """
+    try:
+        user_id = int(callback.data.split(":", 1)[1])
+    except Exception:
+        await callback.answer("Ошибка: неверный ID пользователя", show_alert=True)
+        return
+
+    current_lang = i18n_data.get("current_language", settings.DEFAULT_LANGUAGE)
+    i18n: Optional[JsonI18n] = i18n_data.get("i18n_instance")
+    if not i18n:
+        await callback.answer("Language service error", show_alert=True)
+        return
+
+    # Get user from DB
+    user = await user_dal.get_user_by_id(session, user_id)
+    if not user:
+        await callback.answer("User not found", show_alert=True)
+        return
+
+    try:
+        from bot.services.referral_service import ReferralService
+        referral_service = ReferralService(settings, subscription_service, bot, i18n)
+
+        user_card_text = await format_user_card(
+            user,
+            session,
+            subscription_service,
+            i18n,
+            current_lang,
+            referral_service,
+        )
+
+        keyboard = get_user_card_keyboard(
+            user_id,
+            i18n,
+            current_lang,
+            user.referred_by_id,
+        )
+
+        # чуть аккуратнее раскладка — без кнопки "назад в список"
+        quick_links_width = 2 if user.referred_by_id else 1
+        keyboard.adjust(2, 2, 2, quick_links_width, 1, 2)
+
+        await bot.send_message(
+            chat_id=callback.from_user.id,
+            text=user_card_text,
+            reply_markup=keyboard.as_markup(),
+            parse_mode="HTML",
+        )
+
+        await callback.answer()
+
+    except Exception as e:
+        import logging
+        logging.error(f"Error displaying support user card: {e}")
+        await callback.answer("Error displaying user card", show_alert=True)
+
+# --- Support reply flow (admin replies to support message) ---
+class SupportReplyStates(StatesGroup):
+    waiting_for_text = State()
+
+
+@router.callback_query(F.data.startswith("support_reply:"))
+async def support_reply_start(callback: types.CallbackQuery, state: FSMContext):
+    """
+    Admin clicks "Ответить" under a support message.
+    Next admin message will be sent to that user.
+    Does NOT open/return any user card.
+    """
+    try:
+        target_user_id = int(callback.data.split(":", 1)[1])
+    except Exception:
+        await callback.answer("Ошибка: неверный ID пользователя", show_alert=True)
+        return
+
+    await state.update_data(support_reply_target_user_id=target_user_id)
+    await state.set_state(SupportReplyStates.waiting_for_text)
+
+    await callback.answer()
+    # Не редактируем исходное сообщение, чтобы не было скачков интерфейса
+    if callback.message:
+        await callback.message.answer(
+            f"✉️ <b>Отправка сообщения пользователю</b> <code>{target_user_id}</code>\n\n"
+            f"Введите текст сообщения:",
+            parse_mode="HTML",
+        )
+
+
+@router.message(SupportReplyStates.waiting_for_text, F.text)
+async def support_reply_send(message: types.Message, state: FSMContext, bot: Bot):
+    data = await state.get_data()
+    target_user_id = data.get("support_reply_target_user_id")
+    text = (message.text or "").strip()
+
+    if not target_user_id:
+        await message.answer("Ошибка: не найден получатель. Нажмите «Ответить» ещё раз.")
+        await state.clear()
+        return
+
+    if not text:
+        await message.answer("Текст пустой. Введите сообщение ещё раз.")
+        return
+
+    # Отправляем пользователю без лишней пустой строки перед разделителем
+    user_text = f"{text}\n—\n💬 Сообщение от администратора"
+    await bot.send_message(target_user_id, user_text)
+
+
+    # delete user's "message sent to support" ack to make it look like a dialog
+    try:
+        key_u = StorageKey(bot_id=bot.id, chat_id=target_user_id, user_id=target_user_id)
+        udata = await state.storage.get_data(key_u)
+        ack_id = udata.get("support_last_ack_message_id")
+        if ack_id:
+            try:
+                await bot.delete_message(target_user_id, ack_id)
+            except Exception as e:
+                logging.warning(f"Failed to delete support ack message {ack_id} for user {target_user_id}: {e}")
+            udata.pop("support_last_ack_message_id", None)
+            await state.storage.set_data(key_u, udata)
+    except Exception as e:
+        logging.warning(f"Failed to load/store support ack message_id for user {target_user_id}: {e}")
+
+    await message.answer(f"✅ Сообщение отправлено пользователю <code>{target_user_id}</code>", parse_mode="HTML")
+    await state.clear()
